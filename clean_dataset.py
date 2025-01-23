@@ -173,7 +173,7 @@ def run(dset_path) -> pd.DataFrame:
     prev_len = len(df)
 
     print('Filtering DNS requests')
-    df = filter_DNS(df, '../data/top-1m.csv')
+    df = filter_DNS(df, 'top-1m.csv')
     print(f'Removed {prev_len - len(df)} rows')
 
     prev_len = len(df)
@@ -185,10 +185,10 @@ def run(dset_path) -> pd.DataFrame:
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print('Usage: python clean_dataset.py <in-path> <out-path>')
+    if len(sys.argv) < 3:
+        print('Usage: python clean_dataset.py <dataset_path> <output_dir>')
         sys.exit(1)
 
     path = sys.argv[1]
     df = run(path)
-    df.to_csv('out/dataset.csv', index=False)
+    df.to_csv(path.join([sys.argv[2], 'dataset.csv']), index=False)
