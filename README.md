@@ -1,7 +1,8 @@
 ## Usage
+The transformation from PCAPs to CSVs and the cleaning of the dataset is done in two steps to allow rerunning the cleaning step without having to reprocess the PCAPs:
 
 ### `process_dataset.sh`
-Process PCAPs into CSVs using ipfixprobe, set the 
+Process PCAPs into CSVs using ipfixprobe
 
 Usage: `./process_dataset.sh <pcap_dataset> <output_dir>`
 - `<pcap_dataset>`: Path to the directory containing subdirectories for each family that contain the PCAPs
