@@ -191,4 +191,4 @@ if __name__ == '__main__':
 
     path = sys.argv[1]
     df = run(path)
-    df.to_csv(path.join([sys.argv[2], 'dataset.csv']), index=False)
+    df.to_csv(os.path.join(sys.argv[2], 'dataset.csv'), index=False)
