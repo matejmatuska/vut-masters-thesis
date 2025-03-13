@@ -17,7 +17,7 @@ if [ ! -d "$OUTPUT_DIR" ]; then
     echo "Output directory does not exist!" >&2
 fi
 
-IPFIXPROBE_CMD=/usr/bin/ipfixprobe
+IPFIXPROBE_CMD=/usr/local/bin/ipfixprobe
 LOGGER_CMD=/usr/local/bin/logger
 
 process_family() {
@@ -25,7 +25,7 @@ process_family() {
     local family_dir="$2"
 
     local N=6
-    for pcap in "$family_dir"*.pcapng; do
+    for pcap in "$family_dir"/*.pcapng; do
         ((i=i%N)); ((i++==0)) && wait
         basename="$OUTPUT_DIR/$fam_name/${pcap##*/}"
         trapfile="${basename%.*}.trap"
@@ -36,7 +36,9 @@ process_family() {
 }
 
 
-for family_dir in "$DATASET_PATH"*/; do
+echo "Working on dataset at $DATASET_PATH"
+
+for family_dir in "$DATASET_PATH"/*; do
     fam_name=${family_dir%*/}
     fam_name=${fam_name##*/}
     echo "Processing family - $family_dir -> $OUTPUT_DIR/$fam_name"
