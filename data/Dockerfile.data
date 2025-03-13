@@ -1,0 +1,9 @@
+FROM localhost/ipfixprobe
+
+VOLUME /data
+
+COPY /code/process_dataset.sh /usr/local/bin
+
+WORKDIR /data
+
+ENTRYPOINT ["process_dataset.sh"]

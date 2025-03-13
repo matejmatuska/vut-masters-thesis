@@ -1,0 +1,86 @@
+FROM debian:bullseye
+
+WORKDIR /root
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    automake \
+    libtool \
+    curl \
+    git \
+    bash \
+    libssl-dev \
+    pkg-config \
+    python3 \
+    python3-pip \
+    python3-setuptools \
+    python3-wheel \
+    libpcap-dev \
+    libxml2-utils \
+    gawk \
+    bc \
+    libidn11-dev \
+    bison \
+    flex \
+    libxml2 \
+    autoconf \
+    gawk \
+    bc \
+    autoconf \
+    automake \
+    gcc \
+    g++ \
+    libtool \
+    libxml2-dev \
+    make \
+    pkg-config \
+    libpcap-dev \
+    libidn11-dev \
+    bison \
+    flex \
+    tmux \
+    iproute2 \
+    wireguard \
+    liblz4-dev
+
+
+#RUN apt-get update && apt-get install -y --no-install-recommends \
+#    libpcap-dev \
+#    libxml2-utils \
+#    gawk \
+#    bc \
+#    libidn11-dev \
+#    bison \
+#    flex
+
+WORKDIR /root
+
+
+RUN git clone --recursive https://github.com/CESNET/nemea \
+    && cd nemea \
+    && ./bootstrap.sh \
+    && ./configure --prefix=/usr --bindir=/usr/local/bin --sysconfdir=/etc/nemea --libdir=/usr/lib \
+    && make -j$(nproc) \
+    && make install
+
+RUN apt-get install cmake libfuse-dev libfuse3-dev -y
+
+RUN git clone https://github.com/CESNET/telemetry.git \
+    && cd telemetry/ \
+    && sed -i '/rpm/d' pkg/CMakeLists.txt \
+    && make \
+    && make install
+
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
+
+RUN git clone --recurse-submodules https://github.com/CESNET/ipfixprobe \
+	&& cd ipfixprobe \
+	&& autoreconf -i \
+	&& ./configure --with-nemea --with-pcap\
+	&& make -j$(nproc) \
+	&& make install
+
+
+# COPY run.py /root/
+
+# CMD python3 /root/run.py
