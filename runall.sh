@@ -65,13 +65,13 @@ stage "Unpacking archives to $EXTRACT_DIR ..."
 for i in {3..4}; do
     file="$DATASET_DIR/Malware-2024072$i.tar.gz"
     echo "Unpacking $file ..." | tee -a "$LOG_FILE"
-    tar -xzvf --strip-components=1 "$file" -C "$EXTRACT_DIR" >> "$LOG_FILE" @>&1 || exit 1
+    tar --strip-components=1 -xzvf "$file" -C "$EXTRACT_DIR" >> "$LOG_FILE" @>&1 || exit 1
 done
 
 for i in {5..8}; do
     file="$DATASET_DIR/Malware-2024072$i.tar"
     echo "Unpacking $file ..." | tee -a "$LOG_FILE"
-    tar -xvf --strip-components=1 "$file" -C "$EXTRACT_DIR" >> "$LOG_FILE" 2>&1 || exit 1
+    tar --strip-components=1 -xvf "$file" -C "$EXTRACT_DIR" >> "$LOG_FILE" 2>&1 || exit 1
 done
 
 
