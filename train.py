@@ -1,6 +1,4 @@
 import argparse
-import os
-import sys
 import time
 
 from ast import literal_eval
@@ -15,9 +13,9 @@ import seaborn as sns
 
 import torch
 import torch.nn.functional as F
+from torch.utils.data import random_split
 
 import torch_geometric
-from torch.utils.data import random_split
 from torch_geometric.loader import DataLoader
 from torch_geometric.logging import log
 from torch_geometric.utils import from_networkx
@@ -25,7 +23,7 @@ from torch_geometric.utils import from_networkx
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix
 
-from model.baseline import GCNGraphClassifier, GraphClassifier
+from model.baseline import GraphClassifier
 
 
 def row_to_graph(
@@ -40,7 +38,7 @@ def row_to_graph(
         return np.pad(ppi_str, (0, to_len - len(ppi_str)), 'constant', constant_values=value)
 
     G = nx.MultiDiGraph()
-    # Populate the graph with nodes and edges from the DataFrame
+    # populate the graph with nodes and edges from the DataFrame
     for _, row in df.iterrows():
         src_ip = row['SRC_IP']
         dst_ip = row['DST_IP']
@@ -88,10 +86,8 @@ def sample_to_graph(df):
     graph = row_to_graph(df, draw=False)
     label = df['label_encoded'].iloc[0]
 
-    # make torch data
     data = from_networkx(graph)
     data.edge_attr = torch.tensor([list(graph.edges[edge].values()) for edge in graph.edges], dtype=torch.float32)
-    # TODO add the label to the graph
     data.y = torch.tensor([label], dtype=torch.long)
 
 
@@ -106,8 +102,8 @@ def load_dataset_csv(path, store=False):
     df = pd.read_csv(path)
     df = df[~df['family'].isin(['LOKIBOT', 'XWORM', 'NETWIRE', 'SLIVER', 'AGENTTESLA', 'WARZONERAT', 'COBALTSTRIKE'])]
 
-    min_samples = 200
-    max_samples = 500
+    min_samples = 500
+    max_samples = 1500
 
     sample_counts = (
         df[['family', 'sample']]
@@ -145,7 +141,6 @@ def load_dataset_csv(path, store=False):
     for sample_name, group in df.groupby('sample'):
         dataset.append(sample_to_graph(group))
 
-
     # TODO what's a good split ratio?
     train_size = int(0.8 * len(dataset))
     test_size = len(dataset) - train_size
@@ -158,7 +153,6 @@ def load_dataset_csv(path, store=False):
         torch.save(test_dataset, 'test.pt')
 
     return train_dataset, test_dataset, df['family'].unique()
-
 
 
 def train(model, train_loader, optimizer, class_weights):
@@ -250,30 +244,28 @@ def plot_confusion_matrix(cm, epoch, path):
         plt.savefig(path)
     else:
         plt.show()
+
+    mlflow.log_figure(plt.gcf(), f"confusion_matrix.png")
     plt.close()
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Training script arguments")
-    # Positional argument (unnamed) for dataset path
+
     parser.add_argument("dataset_path", type=str, help="Path to the dataset")
 
-    # Common training arguments
     parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training and testing")
     parser.add_argument("--learning_rate", "--lr", type=float, default=0.001, help="Learning rate for optimizer")
-    #parser.add_argument("--momentum", type=float, default=0.9, help="Momentum for optimizers like SGD")
-    #parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay (L2 regularization)")
-    parser.add_argument("--optimizer", type=str, default="adam", choices=["sgd", "adam", "rmsprop"], help="Optimizer to use")
+    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay (L2 regularization)")
+    #parser.add_argument("--optimizer", type=str, default="adam", choices=["sgd", "adam", "rmsprop"], help="Optimizer to use")
     parser.add_argument("--device", type=str, default="cpu", choices=["cuda", "cpu"], help="Device to run training on")
     # parser.add_argument("--save_model", type=str, default=None, help="Path to save the trained model")
     # parser.add_argument("--load_model", type=str, default=None, help="Path to load a pre-trained model")
-
     return parser.parse_args()
 
 
 if __name__ == '__main__':
-
     train_dataset = None
     test_dataset = None
 
@@ -327,7 +319,7 @@ if __name__ == '__main__':
 
     model = GraphClassifier(
         edge_dim=train_dataset[0].edge_attr.size(1),
-        hidden_dim=100,
+        hidden_dim=64,
         num_classes=num_classes,
     ).to(device)
 
@@ -335,7 +327,8 @@ if __name__ == '__main__':
     #     dict(params=model.conv1.parameters(), weight_decay=5e-4),
     #     dict(params=model.conv2.parameters(), weight_decay=0)
     # ], lr=learning_rate)  # Only perform weight-decay on first convolution.
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate,
+                                 weight_decay=args.weight_decay)
 
     best_acc = 0
     times = []

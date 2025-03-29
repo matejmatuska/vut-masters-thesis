@@ -48,13 +48,8 @@ class GraphClassifier(torch.nn.Module):
 
     def forward(self, data):
         #x = self.node_embedding.weight.repeat(data.num_nodes, 1)
-        x = torch.zeros((data.num_nodes, 1))  # Dummy node features
-        # print('-----')
-        # print(x.shape)
+        x = torch.zeros((data.num_nodes, 1))  # dummy node features
         x = self.gnn(x, data.edge_index, data.edge_attr)
-        # print(x.shape)
-        # print(data.num_nodes)
-        # print(data.batch.shape)
         graph_rep = self.pool(x, data.batch)
         return self.classifier(graph_rep)
 
