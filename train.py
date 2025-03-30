@@ -1,14 +1,9 @@
 import argparse
 import time
 
-from ast import literal_eval
-from collections import defaultdict
-
 import matplotlib.pyplot as plt
 import mlflow
 import numpy as np
-import networkx as nx
-import pandas as pd
 import seaborn as sns
 
 import torch
@@ -18,141 +13,30 @@ from torch.utils.data import random_split
 import torch_geometric
 from torch_geometric.loader import DataLoader
 from torch_geometric.logging import log
-from torch_geometric.utils import from_networkx
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix
+from torch_geometric.transforms import NormalizeFeatures
 
+from dataset import GraphDataset
 from model.baseline import GraphClassifier
 
 
-def row_to_graph(
-    df,
-    draw=False,
-    attributes=['PACKETS', 'BYTES', 'TCP_FLAGS', 'TCP_FLAGS_REV', 'DST_PORT', 'PROTOCOL', 'SRC_PORT'],
-):
+def split_dataset(dataset, train_ratio=0.8, seed=42):
     """
-    Convert a row of dataset DataFrame to a digraph.
+    Split a dataset into training and testing sets.
+
+    :param dataset: The dataset of graphs to split.
+    :param train_ratio: The ratio of the dataset to use for training.
+    :return: A tuple of (train_dataset, test_dataset).
     """
-    def pad_ppi(ppi_str, to_len=30, value=0):
-        return np.pad(ppi_str, (0, to_len - len(ppi_str)), 'constant', constant_values=value)
-
-    G = nx.MultiDiGraph()
-    # populate the graph with nodes and edges from the DataFrame
-    for _, row in df.iterrows():
-        src_ip = row['SRC_IP']
-        dst_ip = row['DST_IP']
-        edge_attr = {attr: row[attr] for attr in attributes}
-
-        edge_attr['PPI_PKT_LENGTHS'] = pad_ppi(row['PPI_PKT_LENGTHS'], value=-1)
-        #edge_attr['PPI_PKT_TIMES'] = pad_ppi(row['PPI_PKT_TIMES'], value=0)
-        #print(edge_attr['PPI_PKT_TIMES'])
-
-        # Add edge with attributes
-        G.add_edge(src_ip, dst_ip, **edge_attr)
-
-    if draw:
-        edge_labels = nx.get_edge_attributes(G, 'packets')
-        pos = nx.circular_layout(G)
-
-        nx.draw(G, pos, with_labels=True, node_color='skyblue', node_size=2000, font_size=10)
-        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
-        plt.show()
-
-
-    def aggregate_edges(graph, aggfunc=np.mean) -> nx.DiGraph:
-        """
-        Aggregate edges of a multi-digraph to a standard di-graph.
-        """
-        ret = nx.DiGraph()
-        edge_data = defaultdict(lambda: defaultdict(list))
-
-        for u, v, data in graph.edges(data=True):
-            for key, val in data.items():
-                edge_data[(u, v)][key].append(val)
-
-        for (u, v), data in edge_data.items():
-            agg_data = {key: aggfunc(val_list) for key, val_list in data.items()}
-            ret.add_edge(u, v, **agg_data)
-
-        return ret
-
-    agg_G = aggregate_edges(G)
-    assert not any(nx.isolates(agg_G))
-    return agg_G
-
-
-def sample_to_graph(df):
-    graph = row_to_graph(df, draw=False)
-    label = df['label_encoded'].iloc[0]
-
-    data = from_networkx(graph)
-    data.edge_attr = torch.tensor([list(graph.edges[edge].values()) for edge in graph.edges], dtype=torch.float32)
-    data.y = torch.tensor([label], dtype=torch.long)
-
-
-    return data
-
-
-def load_dataset_csv(path, store=False):
-    """
-    Load a dataset from a CSV file.
-    """
-    dataset = []
-    df = pd.read_csv(path)
-    df = df[~df['family'].isin(['LOKIBOT', 'XWORM', 'NETWIRE', 'SLIVER', 'AGENTTESLA', 'WARZONERAT', 'COBALTSTRIKE'])]
-
-    min_samples = 500
-    max_samples = 1500
-
-    sample_counts = (
-        df[['family', 'sample']]
-            .drop_duplicates()  # Get unique family-sample combinations
-            .groupby('family')  # Group by family
-            .size()  # Count the number of unique samples per family
+    generator = torch.Generator().manual_seed(seed)
+    train_dataset, test_dataset = random_split(
+        dataset,
+        [train_ratio, 1 - train_ratio],
+        generator
     )
-
-    # filter families that meet the minimum sample requirement
-    valid_families = sample_counts[sample_counts >= min_samples].index
-
-    # filter the original DataFrame to keep only valid families
-    df_filtered = df[df['family'].isin(valid_families)]
-    print(df_filtered)
-
-    # reduce samples per family to the max limit
-    selected_samples = (
-        df_filtered[['family', 'sample']].drop_duplicates()
-            .groupby('family', group_keys=False)
-            .apply(lambda x: x.sample(n=min(len(x), max_samples)))
-    )
-
-    # merge to keep only flows from selected samples
-    df = df_filtered.merge(selected_samples, on=['family', 'sample'])
-    print(df[['family', 'sample']].drop_duplicates()['family'].value_counts())
-    print(df[['family', 'sample']].drop_duplicates()['family'].value_counts().sum())
-
-
-    df['label_encoded'], _ = pd.factorize(df['family'])
-    print(f'Encoded familites: {df.groupby("family")["label_encoded"].first()}')
-
-    df['PPI_PKT_LENGTHS'] = df['PPI_PKT_LENGTHS'].str.replace('|', ',')
-    df['PPI_PKT_LENGTHS'] = df['PPI_PKT_LENGTHS'].apply(literal_eval)
-
-    for sample_name, group in df.groupby('sample'):
-        dataset.append(sample_to_graph(group))
-
-    # TODO what's a good split ratio?
-    train_size = int(0.8 * len(dataset))
-    test_size = len(dataset) - train_size
-
-    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-    print('Train dataset size:', len(train_dataset))
-    print('Test dataset size:', len(test_dataset))
-    if store:
-        torch.save(train_dataset, 'train.pt')
-        torch.save(test_dataset, 'test.pt')
-
-    return train_dataset, test_dataset, df['family'].unique()
+    return train_dataset, test_dataset
 
 
 def train(model, train_loader, optimizer, class_weights):
@@ -200,7 +84,7 @@ def test(model, test_loader, class_weights, last_epoch=False):
         all_labels = all_labels.numpy()
 
         conf_matrix = confusion_matrix(all_labels, all_preds)
-        plot_confusion_matrix(conf_matrix, epoch)
+        log_conf_matrix(conf_matrix, epoch)
 
         print("\nClassification Report:")
         print(classification_report(all_labels, all_preds, digits=4))
@@ -210,15 +94,13 @@ def test(model, test_loader, class_weights, last_epoch=False):
     return avg_loss, accuracy
 
 
-def normalize_data(train_dataset, test_dataset):
-    all_edge_attr = torch.cat([data.edge_attr for data in train_dataset + test_dataset], dim=0)
+def normalize_data(dataset):
+    all_edge_attr = torch.cat([data.edge_attr for data in dataset], dim=0)
 
     scaler = StandardScaler()
     scaler.fit(all_edge_attr.numpy())  # Fit scaler on all edge attributes
 
-    for data in train_dataset:
-        data.edge_attr = torch.tensor(scaler.transform(data.edge_attr.numpy()), dtype=torch.float)
-    for data in test_dataset:
+    for data in dataset:
         data.edge_attr = torch.tensor(scaler.transform(data.edge_attr.numpy()), dtype=torch.float)
 
 
@@ -232,20 +114,15 @@ def compute_class_weights(dataset):
     return class_weights_tensor
 
 
-def plot_confusion_matrix(cm, epoch, path):
+def log_conf_matrix(cm, path="confusion_matrix.png"):
     plt.figure(figsize=(8, 6))
     ticks = np.arange(0, cm.shape[0])
     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=ticks, yticklabels=ticks)
-    plt.title(f"Confusion Matrix (Epoch {epoch})")
+    plt.title(f"Confusion Matrix")
     plt.xlabel("Predicted")
     plt.ylabel("True")
 
-    if path is not None:
-        plt.savefig(path)
-    else:
-        plt.show()
-
-    mlflow.log_figure(plt.gcf(), f"confusion_matrix.png")
+    mlflow.log_figure(plt.gcf(), path)
     plt.close()
 
 
@@ -253,73 +130,61 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Training script arguments")
 
     parser.add_argument("dataset_path", type=str, help="Path to the dataset")
+    parser.add_argument("model", type=str, choices=["baseline"], help="Model to train")
 
-    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
+    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
+    #parser.add_argument("--hidden", type=int, default=100, help="Hidden dimension size")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training and testing")
     parser.add_argument("--learning_rate", "--lr", type=float, default=0.001, help="Learning rate for optimizer")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay (L2 regularization)")
     #parser.add_argument("--optimizer", type=str, default="adam", choices=["sgd", "adam", "rmsprop"], help="Optimizer to use")
     parser.add_argument("--device", type=str, default="cpu", choices=["cuda", "cpu"], help="Device to run training on")
-    # parser.add_argument("--save_model", type=str, default=None, help="Path to save the trained model")
-    # parser.add_argument("--load_model", type=str, default=None, help="Path to load a pre-trained model")
     return parser.parse_args()
 
 
 if __name__ == '__main__':
-    train_dataset = None
-    test_dataset = None
-
     args = parse_args()
 
-    #if len(sys.argv) == 2:
-    #    train_dataset, test_dataset, labels = load_dataset_csv(sys.argv[1], store=True)
-    #    print('Labels:', len(labels))
-    #    num_classes = len(labels)
-    #elif len(sys.argv) == 3:
-    #    train_dataset = torch.load(sys.argv[1])
-    #    test_dataset = torch.load(sys.argv[2])
-    #    print('Labels:', 2)
-    #    num_classes = 2
-    #else:
-    #    print("Usage: python prepare_dataset.py <dataset_path>")
-    #    sys.exit(1)
+    from dataset import load_dataset_csv, sample_to_graph
 
-    train_dataset, test_dataset, labels = load_dataset_csv(args.dataset_path, store=True)
-    print('Labels:', len(labels))
-    num_classes = len(labels)
-    OUTPUT_DIM = num_classes
+    if True:
+        dataset = GraphDataset(
+            root=args.dataset_path,
+            transform=NormalizeFeatures(['edge_attr'])
+        )
+        num_classes = dataset.num_classes
+    else:
+        df = load_dataset_csv(args.dataset_path)
+        dataset = []
+        for sample_name, group in df.groupby('sample'):
+            dataset.append(sample_to_graph(group))
+            print(f"Processed sample: {sample_name}")
 
-    # for data in train_dataset:
-    #     edge_attr = data.edge_attr
-    #     mean = edge_attr.mean(dim=0, keepdim=True)
-    #     std = edge_attr.std(dim=0, keepdim=True) + 1e-8  # Avoid division by zero
-    #     data.edge_attr = (edge_attr - mean) / std
-    #
-    # for data in test_dataset:
-    #     edge_attr = data.edge_attr
-    #     mean = edge_attr.mean(dim=0, keepdim=True)
-    #     std = edge_attr.std(dim=0, keepdim=True) + 1e-8  # Avoid division by zero
-    #     data.edge_attr = (edge_attr - mean) / std
+        print("First sample:", dataset[0])
+        print("First sample:", dataset[0].edge_attr)
 
+        labels =  df['family'].unique()
+        num_classes = len(labels)
+        normalize_data(dataset)
 
-    # Collect all edge attributes across your dataset
-    normalize_data(train_dataset, test_dataset)
+    print("First normal sample:", dataset[0])
+    class_weights = compute_class_weights(dataset)
+    train_dataset, test_dataset = split_dataset(dataset, train_ratio=0.8)
 
-    class_weights = compute_class_weights(train_dataset + test_dataset)
+    print(f'Number of classes: {num_classes}')
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
     print('=== Pytorch DataLoader ===')
-    print('Train size: ', len(train_loader) * train_loader.batch_size)
-    print('Test size: ', len(test_loader) * train_loader.batch_size)
+    print('Train size: ', len(train_dataset))
+    print('Test size: ', len(test_dataset))
 
     device = torch_geometric.device(args.device)
-    print(train_dataset[0].edge_attr.size(1))
 
     model = GraphClassifier(
         edge_dim=train_dataset[0].edge_attr.size(1),
-        hidden_dim=64,
+        hidden_dim=120,
         num_classes=num_classes,
     ).to(device)
 
@@ -334,6 +199,7 @@ if __name__ == '__main__':
     times = []
 
     with mlflow.start_run():
+        mlflow.log_param('num_classes', num_classes)
         mlflow.log_params(vars(args))
 
         for epoch in range(1, args.epochs + 1):
