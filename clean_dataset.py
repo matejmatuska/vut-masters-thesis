@@ -1,32 +1,32 @@
 import os
 import sys
 
-import ipaddress
 import pandas as pd
 
-def load_dataset(path, store=False) -> pd.DataFrame:
-    dataset = pd.DataFrame()
 
-    for root, families, _ in os.walk(path):
-        for family in families:
-            family_path = os.path.join(root, family)
-            for _, _, files in os.walk(family_path):
-                for file in files:
-                    if file.endswith('.csv'):
-                        file_path = os.path.join(family_path, file)
-                        #print(file_path)
-                        try:
-                            df = pd.read_csv(file_path)
-                        except pd.errors.EmptyDataError:
-                            print('Empty file:', file_path)
-                            continue
+def load_dataset(path) -> pd.DataFrame:
+    dfs = []
 
-                        df.columns = df.columns.str.split().str[1]
+    for subdir, _, files in os.walk(path):
+        csv_files = [f for f in files if f.endswith('.csv')]
+        fam = os.path.basename(subdir)
 
-                        df['family'] = family
-                        df['sample'] = file
+        for file in csv_files:
+            fpath = os.path.join(subdir, file)
 
-                        dataset = pd.concat([dataset, df], ignore_index=True)
+            try:
+                df = pd.read_csv(fpath)
+            except pd.errors.EmptyDataError:
+                print('Empty file:', fpath)
+                continue
+
+            df.columns = df.columns.str.split().str[1]  # must be before adding new columns
+            df['family'] = fam
+            df['sample'] = file
+
+            dfs.append(df)
+
+    dataset = pd.concat(dfs, ignore_index=True)
     return dataset
 
 
@@ -61,7 +61,7 @@ def filter_common_ips(df, common_ips):
     return df
 
 
-def filter_DNS(df, filter_names):
+def filter_DNS(df, filter_names, output_dir):
     top1m = pd.read_csv(filter_names, names=['index', 'domain'], usecols=['domain'])['domain']
     keep_domains = [
         r'^mail\..*',
@@ -131,16 +131,16 @@ def filter_DNS(df, filter_names):
 
     combined_regex = '|'.join(f'({pattern})' for pattern in keep_domains)
     top1m = top1m[~top1m.str.contains(combined_regex, regex=True)]
-    top1m.to_csv('domains-to-remove.csv', index=False)
+    top1m.to_csv(os.path.join(output_dir, 'domains-to-remove.csv'), index=False)  # TODO put to some dated folder
 
     index = df['DNS_NAME'].isin(set(top1m))
 
     removed = df[index]
-    removed['DNS_NAME'].to_csv('out/removed_dns.csv', index=False)
+    removed['DNS_NAME'].to_csv(os.path.join(output_dir, 'removed_dns.csv'), index=False)
     return df[~index]
 
 
-def filter_rDNS(df) -> pd.DataFrame:
+def filter_rDNS(df, output_dir) -> pd.DataFrame:
     """
     Filter reverse DNS requests occurring in multiple families
     """
@@ -152,20 +152,20 @@ def filter_rDNS(df) -> pd.DataFrame:
     index = (df['DNS_QTYPE'] == 12) & (df['DNS_NAME'].isin(set(common_names[common_names > 1].index)))
 
     removed = df[index]
-    removed.to_csv('out/removed_rdns.csv', index=False)
+    removed.to_csv(os.path.join('removed_rdns.csv'), index=False)
     return df[~index]
 
 
-def run(dset_path) -> pd.DataFrame:
+def run(dset_path, output_dir) -> pd.DataFrame:
     print('Loading dataset')
-    df = load_dataset(dset_path, store=True)
+    df = load_dataset(dset_path)
     print(f'Loaded {len(df)} rows (flows)')
     print(df.columns)
 
     prev_len = len(df)
 
     print('Filtering common IPs')
-    common_ips = pd.read_csv('filter_ips.csv')
+    common_ips = pd.read_csv('data/filter_common_ips.csv')  # TODO: this should be computed!!!
     df = filter_common_ips(df, common_ips['DST_IP'])
     #print(df.groupby(['family', 'sample']).size())
     print(f'Removed {prev_len - len(df)} rows')
@@ -173,13 +173,13 @@ def run(dset_path) -> pd.DataFrame:
     prev_len = len(df)
 
     print('Filtering DNS requests')
-    df = filter_DNS(df, 'top-1m.csv')
+    df = filter_DNS(df, 'data/top-1m.csv', output_dir)
     print(f'Removed {prev_len - len(df)} rows')
 
     prev_len = len(df)
 
     print('Filtering common rDNS requests')
-    df = filter_rDNS(df)
+    df = filter_rDNS(df, output_dir)
     print(f'Removed {prev_len - len(df)} rows')
     return df
 
@@ -190,5 +190,5 @@ if __name__ == '__main__':
         sys.exit(1)
 
     path = sys.argv[1]
-    df = run(path)
+    df = run(path, sys.argv[2])
     df.to_csv(os.path.join(sys.argv[2], 'dataset.csv'), index=False)
