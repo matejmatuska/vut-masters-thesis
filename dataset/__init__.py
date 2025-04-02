@@ -19,10 +19,12 @@ def sample_to_graph(df):
     aggregated from a PCAP file of a single malware sample execution.
     """
     graph = row_to_graph(df, draw=False)
-    label = df['label_encoded'].iloc[0]
+    label = df["label_encoded"].iloc[0]
 
     data = from_networkx(graph)
-    data.edge_attr = torch.tensor([list(graph.edges[edge].values()) for edge in graph.edges], dtype=torch.float32)
+    data.edge_attr = torch.tensor(
+        [list(graph.edges[edge].values()) for edge in graph.edges], dtype=torch.float32
+    )
     data.y = torch.tensor([label], dtype=torch.long)
     return data
 
@@ -37,34 +39,36 @@ def load_dataset_csv(path, samples=(500, 1500)):
     :rtype: pandas.DataFrame
     """
     df = pd.read_csv(path)
-    #df = df[~df['family'].isin(['LOKIBOT', 'XWORM', 'NETWIRE', 'SLIVER', 'AGENTTESLA', 'WARZONERAT', 'COBALTSTRIKE'])]
+    # df = df[~df['family'].isin(['LOKIBOT', 'XWORM', 'NETWIRE', 'SLIVER', 'AGENTTESLA', 'WARZONERAT', 'COBALTSTRIKE'])]
 
-    sample_counts = (
-        df[['family', 'sample']]
-            .drop_duplicates()
-            .groupby('family')
-            .size()
-    )
+    # remove samples with small number of packets
+    group_sums = df.groupby("sample")[["PACKETS", "PACKETS_REV"]].transform("sum")
+    df = df[(group_sums.sum(axis=1) > 4) & (group_sums.sum(axis=1) < 1e6)]
+
+    # remove families with small number of samples
+    sample_counts = df[["family", "sample"]].drop_duplicates().groupby("family").size()
 
     enough_samples = sample_counts[sample_counts >= samples[0]].index
-    df_filtered = df[df['family'].isin(enough_samples)]
+    df_filtered = df[df["family"].isin(enough_samples)]
     print(df_filtered)
 
+    # cap the number of samples per family
     selected_samples = (
-        df_filtered[['family', 'sample']].drop_duplicates()
-            .groupby('family', group_keys=False)
-            .apply(lambda x: x.sample(n=min(len(x), samples[1])))
+        df_filtered[["family", "sample"]]
+        .drop_duplicates()
+        .groupby("family", group_keys=False)
+        .apply(lambda x: x.sample(n=min(len(x), samples[1])))
     )
 
-    df = df_filtered.merge(selected_samples, on=['family', 'sample'])
-    print(df[['family', 'sample']].drop_duplicates()['family'].value_counts())
-    print(df[['family', 'sample']].drop_duplicates()['family'].value_counts().sum())
+    df = df_filtered.merge(selected_samples, on=["family", "sample"])
+    print(df[["family", "sample"]].drop_duplicates()["family"].value_counts())
+    print(df[["family", "sample"]].drop_duplicates()["family"].value_counts().sum())
 
-    df['label_encoded'], _ = pd.factorize(df['family'])
+    df["label_encoded"], _ = pd.factorize(df["family"])
     print(f'Encoded familites: {df.groupby("family")["label_encoded"].first()}')
 
-    df['PPI_PKT_LENGTHS'] = df['PPI_PKT_LENGTHS'].str.replace('|', ',')
-    df['PPI_PKT_LENGTHS'] = df['PPI_PKT_LENGTHS'].apply(literal_eval)
+    df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].str.replace("|", ",")
+    df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].apply(literal_eval)
 
     #df['PPI_PKT_TIMES'] = df['PPI_PKT_TIMES'].str[1:-1]
     #df['PPI_PKT_TIMES'] = df['PPI_PKT_TIMES'].str.split('|')
@@ -80,20 +84,20 @@ class GraphDataset(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        return ['dataset.csv']
+        return ["dataset.csv"]
 
     @property
     def processed_file_names(self):
-        return ['dataset.pt']
+        return ["dataset.pt"]
 
     def process(self):
         df = load_dataset_csv(self.raw_paths[0])
         df.to_csv(os.path.join(self.root, 'processed', 'used.csv'), index=False)
 
         data_list = []
-        for sample_name, group in df.groupby('sample'):
+        for sample_name, group in df.groupby("sample"):
             data_list.append(sample_to_graph(group))
-            print(f"Processed sample: {sample_name}")
+            # print(f"Processed sample: {sample_name}")
 
         if self.pre_filter is not None:
             data_list = [data for data in data_list if self.pre_filter(data)]
