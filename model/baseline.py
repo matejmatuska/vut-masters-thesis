@@ -180,8 +180,8 @@ def row_to_graph(
     """
     Convert a row of dataset DataFrame to a digraph.
     """
-    def pad_ppi(ppi_str, to_len=30, value=0):
-        return np.pad(ppi_str, (0, to_len - len(ppi_str)), 'constant', constant_values=value)
+    def pad_ppi(series, to_len=30, value=0):
+        return np.pad(series, (0, to_len - len(series)), 'constant', constant_values=value)
 
     G = nx.MultiDiGraph()
     # populate the graph with nodes and edges from the DataFrame
@@ -190,11 +190,10 @@ def row_to_graph(
         dst_ip = row['DST_IP']
         edge_attr = {attr: row[attr] for attr in attributes}
 
+        # TODO how long?
         edge_attr['PPI_PKT_LENGTHS'] = pad_ppi(row['PPI_PKT_LENGTHS'], value=0)
-        #edge_attr['PPI_PKT_TIMES'] = pad_ppi(row['PPI_PKT_TIMES'], value=0)
-        #print(edge_attr['PPI_PKT_TIMES'])
+        edge_attr['PPI_PKT_TIMES'] = pad_ppi(row['PPI_PKT_TIMES'], value=0)
 
-        # Add edge with attributes
         G.add_edge(src_ip, dst_ip, **edge_attr)
 
     # if draw:

@@ -70,9 +70,16 @@ def load_dataset_csv(path, samples=(500, 1500)):
     df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].str.replace("|", ",")
     df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].apply(literal_eval)
 
-    #df['PPI_PKT_TIMES'] = df['PPI_PKT_TIMES'].str[1:-1]
-    #df['PPI_PKT_TIMES'] = df['PPI_PKT_TIMES'].str.split('|')
-    #df['PPI_PKT_TIMES'] = df['PPI_PKT_TIMES'].apply(lambda times: [pd.to_datetime(t).value for t in times])
+    def convert_to_relative_times(timestamps):
+        base = timestamps[0]
+        relative_times = [int((ts - base).total_seconds()) for ts in timestamps]
+        return relative_times[1:]  # TODO maybe?? Measure. Exclude the first timestamp since it's always 0 - can use 0 for padding
+
+    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].str[1:-1].str.split("|")
+    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(
+        pd.to_datetime, format="%Y-%m-%dT%H:%M:%S.%f"
+    )
+    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(convert_to_relative_times)
     return df
 
 
