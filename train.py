@@ -145,8 +145,6 @@ def parse_args():
 if __name__ == '__main__':
     args = parse_args()
 
-    from dataset import load_dataset_csv, sample_to_graph
-
     if True:
         dataset = GraphDataset(
             root=args.dataset_path,
@@ -154,6 +152,7 @@ if __name__ == '__main__':
         )
         num_classes = dataset.num_classes
     else:
+        from dataset import load_dataset_csv, sample_to_graph
         df = load_dataset_csv(args.dataset_path)
         dataset = []
         for sample_name, group in df.groupby('sample'):
@@ -195,13 +194,15 @@ if __name__ == '__main__':
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate,
                                  weight_decay=args.weight_decay)
 
-    best_acc = 0
-    times = []
+    mlflow.set_tracking_uri(uri="http://localhost:5000")
+    mlflow.set_experiment("xmatus36-gnns")
 
     with mlflow.start_run():
         mlflow.log_param('num_classes', num_classes)
         mlflow.log_params(vars(args))
 
+        best_acc = 0
+        times = []
         for epoch in range(1, args.epochs + 1):
             start = time.time()
             train_loss = train(model, train_loader, optimizer, class_weights)
