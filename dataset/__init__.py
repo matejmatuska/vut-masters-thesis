@@ -10,6 +10,8 @@ from torch_geometric.utils import from_networkx
 
 from model.baseline import row_to_graph
 
+from stitch_dns import stitch_dns
+
 
 def sample_to_graph(df):
     """
@@ -29,15 +31,50 @@ def sample_to_graph(df):
     return data
 
 
+def parse_ppi(df):
+    """
+    Parse PPI_PKT_LENGTHS and PPI_PKT_TIMES in the [x|y|z|...] format into Python lists.
+    """
+    df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].str.replace("|", ",")
+    df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].apply(literal_eval)
+
+    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].str[1:-1].str.split("|")
+    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(
+        pd.to_datetime, format="%Y-%m-%dT%H:%M:%S.%f"
+    )
+    return df
+
+
 def load_dataset_csv(path, samples=(500, 1500)):
     """
     Load a dataset from a CSV file.
 
     :param path: Path to the CSV file.
+    :type path: str
     :param samples: A tuple (min_samples, max_samples) to filter the dataset.
     :return: The loaded and prepared CSV dataset.
     :rtype: pandas.DataFrame
     """
+
+    def cap_samples_per_fam(df):
+        # remove families with small number of samples
+        sample_counts = (
+            df[["family", "sample"]].drop_duplicates().groupby("family").size()
+        )
+
+        enough_samples = sample_counts[sample_counts >= samples[0]].index
+        df_filtered = df[df["family"].isin(enough_samples)]
+        print(df_filtered)
+
+        # cap the number of samples per family
+        selected_samples = (
+            df_filtered[["family", "sample"]]
+            .drop_duplicates()
+            .groupby("family", group_keys=False)
+            .apply(lambda x: x.sample(n=min(len(x), samples[1])))
+        )
+        return df_filtered.merge(selected_samples, on=["family", "sample"])
+
     df = pd.read_csv(path)
     # df = df[~df['family'].isin(['LOKIBOT', 'XWORM', 'NETWIRE', 'SLIVER', 'AGENTTESLA', 'WARZONERAT', 'COBALTSTRIKE'])]
 
@@ -45,41 +82,59 @@ def load_dataset_csv(path, samples=(500, 1500)):
     group_sums = df.groupby("sample")[["PACKETS", "PACKETS_REV"]].transform("sum")
     df = df[(group_sums.sum(axis=1) > 4) & (group_sums.sum(axis=1) < 1e6)]
 
-    # remove families with small number of samples
-    sample_counts = df[["family", "sample"]].drop_duplicates().groupby("family").size()
+    keep_cols = [
+        "family",
+        "sample",
+        "DNS_ID",
+        "DNS_NAME",
+        "SRC_IP",
+        "DST_IP",
+        "SRC_PORT",
+        "DST_PORT",
+        "PROTOCOL",
+        "PACKETS",
+        "PACKETS_REV",
+        "BYTES",
+        "BYTES_REV",
+        "TIME_FIRST",
+        "TIME_LAST",
+        "PPI_PKT_LENGTHS",
+        "PPI_PKT_TIMES",
+        "PPI_PKT_TIMES",
+    ]
+    # these are the cols that stitch_dns uses and can aggr right now
+    df = df[keep_cols]
 
-    enough_samples = sample_counts[sample_counts >= samples[0]].index
-    df_filtered = df[df["family"].isin(enough_samples)]
-    print(df_filtered)
+    # has to be done before stitch_dns to be able to aggr PPI cols
+    df = parse_ppi(df)
 
-    # cap the number of samples per family
-    selected_samples = (
-        df_filtered[["family", "sample"]]
-        .drop_duplicates()
-        .groupby("family", group_keys=False)
-        .apply(lambda x: x.sample(n=min(len(x), samples[1])))
-    )
+    # stitch DNS uniflows
+    print("Stitched DNS:")
+    dns = df[df["DNS_NAME"].notna()]
+    nondns = df[df["DNS_NAME"].isna()]
+    dns = stitch_dns(dns).reset_index()
+    df = pd.concat([dns, nondns])
+    print(df)
 
-    df = df_filtered.merge(selected_samples, on=["family", "sample"])
+    print("Filtering out DNS only samples")
+    df["is_dns"] = df["DNS_NAME"].notna()
+    dns_only = df.groupby(["family", "sample"])["is_dns"].transform("all")
+    df = df[~dns_only]
+    print(df)
+
+    df = cap_samples_per_fam(df)
     print(df[["family", "sample"]].drop_duplicates()["family"].value_counts())
     print(df[["family", "sample"]].drop_duplicates()["family"].value_counts().sum())
-
-    df["label_encoded"], _ = pd.factorize(df["family"])
-    print(f'Encoded familites: {df.groupby("family")["label_encoded"].first()}')
-
-    df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].str.replace("|", ",")
-    df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].apply(literal_eval)
 
     def convert_to_relative_times(timestamps):
         base = timestamps[0]
         relative_times = [int((ts - base).total_seconds()) for ts in timestamps]
         return relative_times[1:]  # TODO maybe?? Measure. Exclude the first timestamp since it's always 0 - can use 0 for padding
 
-    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].str[1:-1].str.split("|")
-    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(
-        pd.to_datetime, format="%Y-%m-%dT%H:%M:%S.%f"
-    )
     df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(convert_to_relative_times)
+
+    df["label_encoded"], _ = pd.factorize(df["family"])
+    print(f'Encoded familites: {df.groupby("family")["label_encoded"].first()}')
     return df
 
 
@@ -99,7 +154,7 @@ class GraphDataset(InMemoryDataset):
 
     def process(self):
         df = load_dataset_csv(self.raw_paths[0])
-        df.to_csv(os.path.join(self.root, 'processed', 'used.csv'), index=False)
+        df.to_csv(os.path.join(self.root, "processed", "used.csv"), index=False)
 
         data_list = []
         for sample_name, group in df.groupby("sample"):
