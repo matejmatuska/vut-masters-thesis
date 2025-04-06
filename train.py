@@ -136,8 +136,10 @@ def parse_args():
     #parser.add_argument("--hidden", type=int, default=100, help="Hidden dimension size")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training and testing")
     parser.add_argument("--learning_rate", "--lr", type=float, default=0.001, help="Learning rate for optimizer")
+    parser.add_argument("--dropout", type=float, default=0, help="Dropout rate")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay (L2 regularization)")
     #parser.add_argument("--optimizer", type=str, default="adam", choices=["sgd", "adam", "rmsprop"], help="Optimizer to use")
+    parser.add_argument("--hidden_dim", type=int, default=64, help="Hidden dimension size")
     parser.add_argument("--device", type=str, default="cpu", choices=["cuda", "cpu"], help="Device to run training on")
     return parser.parse_args()
 
@@ -183,8 +185,9 @@ if __name__ == '__main__':
 
     model = GraphClassifier(
         edge_dim=train_dataset[0].edge_attr.size(1),
-        hidden_dim=120,
+        hidden_dim=args.hidden_dim,
         num_classes=num_classes,
+        dropout=args.dropout,
     ).to(device)
 
     # optimizer = torch.optim.Adam([
