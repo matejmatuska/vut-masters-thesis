@@ -1,11 +1,10 @@
 import os
 from ast import literal_eval
 
-import networkx as nx
 import pandas as pd
 import torch
 
-from torch_geometric.data import Data, InMemoryDataset
+from torch_geometric.data import InMemoryDataset
 from torch_geometric.utils import from_networkx
 
 from model.baseline import row_to_graph
@@ -32,11 +31,15 @@ def sample_to_graph(df):
 
 
 def parse_ppi(df):
+    # TODO better docstring
     """
     Parse PPI_PKT_LENGTHS and PPI_PKT_TIMES in the [x|y|z|...] format into Python lists.
     """
     df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].str.replace("|", ",")
     df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].apply(literal_eval)
+
+    df["PPI_PKT_DIRECTIONS"] = df["PPI_PKT_DIRECTIONS"].str.replace("|", ",")
+    df["PPI_PKT_DIRECTIONS"] = df["PPI_PKT_DIRECTIONS"].apply(literal_eval)
 
     df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].str[1:-1].str.split("|")
     df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(
@@ -99,7 +102,7 @@ def load_dataset_csv(path, samples=(500, 1500)):
         "TIME_FIRST",
         "TIME_LAST",
         "PPI_PKT_LENGTHS",
-        "PPI_PKT_TIMES",
+        "PPI_PKT_DIRECTIONS",
         "PPI_PKT_TIMES",
     ]
     # these are the cols that stitch_dns uses and can aggr right now

@@ -10,7 +10,6 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import random_split
 
-import torch_geometric
 from torch_geometric.loader import DataLoader
 from torch_geometric.logging import log
 
@@ -110,7 +109,6 @@ def compute_class_weights(dataset):
 
     class_weights = compute_class_weight('balanced', classes=np.unique(labels), y=labels)
     class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
-    print("Class Weights:", class_weights_tensor)
     return class_weights_tensor
 
 
@@ -170,10 +168,11 @@ if __name__ == '__main__':
 
     print("First normal sample:", dataset[0])
     class_weights = compute_class_weights(dataset)
-    train_dataset, test_dataset = split_dataset(dataset, train_ratio=0.8)
 
     print(f'Number of classes: {num_classes}')
+    print("Class Weights:", class_weights)
 
+    train_dataset, test_dataset = split_dataset(dataset, train_ratio=0.8)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 

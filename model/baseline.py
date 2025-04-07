@@ -87,6 +87,7 @@ def row_to_graph(
 
         # TODO how long?
         edge_attr['PPI_PKT_LENGTHS'] = pad_ppi(row['PPI_PKT_LENGTHS'], value=0)
+        edge_attr['PPI_PKT_DIRECTIONS'] = pad_ppi(row['PPI_PKT_DIRECTIONS'], value=0)
         edge_attr['PPI_PKT_TIMES'] = pad_ppi(row['PPI_PKT_TIMES'], value=0)
 
         G.add_edge(src_ip, dst_ip, **edge_attr)

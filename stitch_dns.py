@@ -25,6 +25,7 @@ _agg_funcs = {
     "TIME_LAST": "max",
     # "PROTOCOL": "first",
     "PPI_PKT_LENGTHS": concat_lists,
+    "PPI_PKT_DIRECTIONS": concat_lists,
     "PPI_PKT_TIMES": concat_lists,
 }
 
@@ -32,6 +33,8 @@ _agg_funcs = {
 def stitch_dns(df):
     """
     Stitch DNS records together based on the family, sample, DNS_ID, and DNS_NAME.
+
+    The PPI fields must be Python lists
     """
     ordered_cols = [
         "SRC_IP",
@@ -66,19 +69,21 @@ def stitch_dns(df):
         # NOTE: this is ugly but recommended in the pandas docs
         # > The correct way to swap column values is by using raw values
         group.loc[isreversed, ordered_cols] = group.loc[isreversed, reverse_cols].values
+
+        # "flip" directions from 1 to 0
+        group.loc[isreversed, 'PPI_PKT_DIRECTIONS'] = group.loc[isreversed, 'PPI_PKT_DIRECTIONS'].map(lambda lst: [-1] * len(lst))
         return group
 
 
     # first aggregate the flows in the same direction
-    df = df.groupby(groupcols).agg(_agg_funcs).reset_index()
     print("Uniflow Aggregated:")
+    df = df.groupby(groupcols).agg(_agg_funcs).reset_index()
     print(df)
     print(df.index)
     print(df.columns)
 
-    # 
-    df = df.groupby(_STITCH_COLS, group_keys=False).apply(flip_reversed_flows)
     print("Reversed columns:")
+    df = df.groupby(_STITCH_COLS, group_keys=False).apply(flip_reversed_flows)
     print(df)
     print(df.index)
     print(df.columns)
@@ -89,8 +94,8 @@ def stitch_dns(df):
     print(df.columns)
 
     # agg to biflow
-    df = df.groupby(groupcols).agg(_agg_funcs)
     print("Reversed columns and biflow merge:")
+    df = df.groupby(groupcols).agg(_agg_funcs)
     print(df)
     return df
 
