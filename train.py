@@ -181,7 +181,7 @@ if __name__ == '__main__':
     print('Train size: ', len(train_dataset))
     print('Test size: ', len(test_dataset))
 
-    device = torch_geometric.device(args.device)
+    device = torch.device(args.device)
 
     model = GraphClassifier(
         edge_dim=train_dataset[0].edge_attr.size(1),

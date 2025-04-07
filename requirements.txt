@@ -1,8 +1,14 @@
 pandas
+pandas-stubs
 numpy
+
 seaborn
 matplotlib
 
+torch
 torch_geometric
-networkx
 scikit-learn
+
+networkx
+
+mlflow
