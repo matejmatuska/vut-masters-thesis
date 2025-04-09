@@ -1,14 +1,17 @@
 import os
+from abc import ABC, abstractmethod
 from ast import literal_eval
+from typing import override
 
+import networkx as nx
+import numpy as np
 import pandas as pd
 import torch
 
-from torch_geometric.data import InMemoryDataset
+from torch_geometric.data import Data, HeteroData, InMemoryDataset
 from torch_geometric.utils import from_networkx
 
 from model.baseline import row_to_graph
-
 from stitch_dns import stitch_dns
 
 
@@ -141,7 +144,7 @@ def load_dataset_csv(path, samples=(500, 1500)):
     return df
 
 
-class GraphDataset(InMemoryDataset):
+class BaseGraphDataset(InMemoryDataset, ABC):
 
     def __init__(self, root, transform=None, pre_transform=None, pre_filter=None):
         super().__init__(root, transform, pre_transform, pre_filter)
@@ -155,14 +158,38 @@ class GraphDataset(InMemoryDataset):
     def processed_file_names(self):
         return ["dataset.pt"]
 
+    @abstractmethod
+    def sample_to_graph(self, df) -> Data|HeteroData|None:
+        """
+        Convert a sample DataFrame to a graph.
+
+        A sample is a DataFrame of flows with the same family and sample name,
+        aggregated from a PCAP file of a single malware sample execution.
+
+        :param df: A DataFrame representing a single sample.
+        :return: A PyTorch Geometric Data or HetetoData object representing the graph.
+        """
+        pass
+
     def process(self):
         df = load_dataset_csv(self.raw_paths[0])
         df.to_csv(os.path.join(self.root, "processed", "used.csv"), index=False)
 
         data_list = []
         for sample_name, group in df.groupby("sample"):
-            data_list.append(sample_to_graph(group))
-            # print(f"Processed sample: {sample_name}")
+            print(f"Processing sample: {sample_name}")
+            if df.empty:
+                print(f"Sample {sample_name} is empty. Skipping.")
+                continue
+            if df.shape[0] < 2:
+                print(f"Sample {sample_name} is < 2. Skipping.")
+                continue
+
+            graph = self.sample_to_graph(group)
+            if graph:
+                data_list.append(graph)
+            else:
+                print(f"Sample {sample_name} has no nodes. Skipping.")
 
         if self.pre_filter is not None:
             data_list = [data for data in data_list if self.pre_filter(data)]
@@ -171,3 +198,10 @@ class GraphDataset(InMemoryDataset):
             data_list = [self.pre_transform(data) for data in data_list]
 
         self.save(data_list, self.processed_paths[0])
+
+
+class SunDataset(BaseGraphDataset):
+
+    @override
+    def sample_to_graph(self, df):
+        return sample_to_graph(df)
