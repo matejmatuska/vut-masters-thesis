@@ -205,3 +205,92 @@ class SunDataset(BaseGraphDataset):
     @override
     def sample_to_graph(self, df):
         return sample_to_graph(df)
+
+
+class ChronoDataset(BaseGraphDataset):
+
+    def row_to_graph(
+        self,
+        df,
+        attributes=[
+            'PACKETS',
+            'PACKETS_REV',
+            'BYTES',
+            'BYTES_REV',
+            # TODO 'TCP_FLAGS',
+            # TODO 'TCP_FLAGS_REV',
+            'PROTOCOL',
+            'SRC_PORT',
+            'DST_PORT',
+            # TODO experiment with these more
+        ],
+    ):
+        """
+        Convert a row of dataset DataFrame to a digraph.
+        """
+
+        def pad_ppi(series, to_len=30, value=0):
+            return np.pad(series, (0, to_len - len(series)), 'constant', constant_values=value)
+
+        def node_key(row):
+            # TODO just some unique key for the node
+            return f"{row['SRC_IP']}:{row['SRC_PORT']}\n{row['DST_IP']}:{row['DST_PORT']}-{row['PROTOCOL']}"
+
+        G = nx.DiGraph()
+
+        # first make the forward edges
+        df = df.sort_values(by='TIME_FIRST', ascending=True).reset_index(drop=True)
+        prev = df.iloc[0]
+        for _, curr in df.iloc[1:].iterrows():
+            prev_node = node_key(prev)
+            curr_node = node_key(curr)
+
+            prev_attrs = prev[attributes].to_dict()
+            prev_attrs['PPI_PKT_LENGTHS'] = pad_ppi(prev['PPI_PKT_LENGTHS'], value=0)
+            prev_attrs['PPI_PKT_DIRECTIONS'] = pad_ppi(prev['PPI_PKT_DIRECTIONS'], value=0)
+            prev_attrs['PPI_PKT_TIMES'] = pad_ppi(prev['PPI_PKT_TIMES'], value=0)
+
+            curr_attrs = curr[attributes].to_dict()
+            curr_attrs['PPI_PKT_LENGTHS'] = pad_ppi(curr['PPI_PKT_LENGTHS'], value=0)
+            curr_attrs['PPI_PKT_DIRECTIONS'] = pad_ppi(curr['PPI_PKT_DIRECTIONS'], value=0)
+            curr_attrs['PPI_PKT_TIMES'] = pad_ppi(curr['PPI_PKT_TIMES'], value=0)
+
+            G.add_node(prev_node, **prev_attrs)
+            G.add_node(curr_node, **curr_attrs)
+            G.add_edge(prev_node, curr_node)  # no edge attributes
+
+            prev = curr
+
+        # now the reverse edges
+        reverse = df.sort_values(by='TIME_LAST', ascending=True)
+        prev = reverse.iloc[0]
+        for _, curr in reverse.iloc[1:].iterrows():
+            prev_node = node_key(prev)
+            curr_node = node_key(curr)
+
+            if curr.name - prev.name > 1:
+                G.add_edge(node_key(curr), node_key(prev))
+
+            if curr.name - prev.name < -1:
+                G.add_edge(node_key(prev), node_key(curr))
+
+            prev = curr
+        return G
+
+    @override
+    def sample_to_graph(self, df):
+        graph = self.row_to_graph(df)
+        print(graph)
+        label = df["label_encoded"].iloc[0]
+
+        if len(graph) == 0:
+            return None
+
+        data = from_networkx(graph, group_node_attrs='all')
+        print(data.x)
+        #data.edge_attr = torch.tensor(
+        #    [list(graph.edges[edge].values()) for edge in graph.edges], dtype=torch.float32
+        #)
+        data.y = torch.tensor([label], dtype=torch.long)
+        print(data)
+        return data
