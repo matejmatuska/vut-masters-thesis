@@ -1,3 +1,10 @@
+"""
+Make assets for the thesis
+
+The first argument is the path to the dataset CSV file.
+TODO Right now the output path is hardcoded to out/
+"""
+
 import sys
 
 import matplotlib.pyplot as plt
@@ -179,8 +186,10 @@ def make_repr_1(df):
 
     plt.figure(figsize=(6, 6))
     pos = nx.kamada_kawai_layout(G)
-    nx.draw(G, pos, with_labels=False, node_color=node_color, node_size=2500, **common_style)
-    nx.draw_networkx_labels(G, pos, labels=ip2hostname, font_color='black', **common_style)
+    nx.draw(G, pos, node_size=2500, **common_style)
+    #nx.draw(G, pos, with_labels=False, node_color=node_color, node_size=2500, **common_style)
+    # nx.draw_networkx_labels(G, pos, labels=ip2hostname, font_color='black', **common_style)
+    # nx.draw_networkx_labels(G, pos, font_color='black', **common_style)
     plt.savefig("repr1.pdf", format="pdf", dpi=300, bbox_inches='tight', pad_inches=0)
     #plt.show()
 
@@ -198,6 +207,7 @@ def make_repr_2(df):
 
     df = df.sort_values(by='TIME_FIRST', ascending=True).reset_index(drop=True)
     print(df)
+
     prev = df.iloc[0]
     add_label(prev)
     for _, curr in df.iloc[1:].iterrows():
@@ -207,11 +217,10 @@ def make_repr_2(df):
 
     curved_edges = []
     reverse = df.sort_values(by='TIME_LAST', ascending=True)
-    print(reverse)
     prev = reverse.iloc[0]
     for _, curr in reverse.iloc[1:].iterrows():
-        G.add_edge(node_key(curr), node_key(prev))
-
+        # I forgot what .name is. It's probably the index of the row in the dataframe
+        # and it's used as a comparator of index (position) of the row in the dataframe
         if curr.name - prev.name > 1:
             curved_edges.append((node_key(curr), node_key(prev)))
             G.add_edge(node_key(curr), node_key(prev))
@@ -220,7 +229,6 @@ def make_repr_2(df):
             curved_edges.append((node_key(prev), node_key(curr)))
             G.add_edge(node_key(prev), node_key(curr))
         prev = curr
-
 
     plt.figure(figsize=(12, 2))
     #pos = nx.shell_layout(G)
@@ -247,14 +255,17 @@ if __name__ == '__main__':
     df['family'].replace(columns, inplace=True)
     make_latex_dset_tab(df)
 
-    df = df[(df['family'] == 'Vidar') & (df['sample'] == '240720-fvt33sxfnq.behavioral1.csv')]
+    #df = df[(df['family'] == 'Vidar') & (df['sample'] == '240720-fvt33sxfnq.behavioral1.csv')]
+    df = df[df['sample'] == '240822-hpsdeaxcjm.behavioral2.csv']
+    print(df)
 
     # FIXME: remove the DNS dups, workaround
-    graph_df = df.copy()
-    graph_df['IPS'] = graph_df.apply(lambda row: ''.join(sorted([row['DST_IP'], row['SRC_IP']])), axis=1)
-    graph_df['PORTS'] = graph_df.apply(lambda row: ''.join(sorted([str(row['SRC_PORT']), str(row['DST_PORT'])])), axis=1)
-    graph_df = graph_df.drop_duplicates(subset=['IPS', 'PORTS', 'DNS_NAME'])
-    print(graph_df[['SRC_IP', 'DST_IP', 'SRC_PORT', 'DST_PORT', 'DNS_NAME', 'PROTOCOL']])
+    # graph_df = df.copy()
+    graph_df = df
+    # graph_df['IPS'] = graph_df.apply(lambda row: ''.join(sorted([row['DST_IP'], row['SRC_IP']])), axis=1)
+    # graph_df['PORTS'] = graph_df.apply(lambda row: ''.join(sorted([str(row['SRC_PORT']), str(row['DST_PORT'])])), axis=1)
+    # graph_df = graph_df.drop_duplicates(subset=['IPS', 'PORTS', 'DNS_NAME'])
+    # print(graph_df[['SRC_IP', 'DST_IP', 'SRC_PORT', 'DST_PORT', 'DNS_NAME', 'PROTOCOL']])
 
 
     make_sun_repr(graph_df)

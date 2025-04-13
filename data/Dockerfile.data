@@ -2,7 +2,7 @@ FROM localhost/ipfixprobe
 
 VOLUME /data
 
-COPY /code/process_dataset.sh /usr/local/bin
+COPY scripts/process_dataset.sh /usr/local/bin
 
 WORKDIR /data
 
