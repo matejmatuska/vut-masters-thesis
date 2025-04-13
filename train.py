@@ -17,8 +17,10 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix
 from torch_geometric.transforms import NormalizeFeatures
 
-from dataset import GraphDataset
+from dataset import ChronoDataset, SunDataset
+
 from model.baseline import GraphClassifier
+from model.chrono import ChronoClassifier
 
 
 def split_dataset(dataset, train_ratio=0.8, seed=42):
@@ -128,7 +130,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Training script arguments")
 
     parser.add_argument("dataset_path", type=str, help="Path to the dataset")
-    parser.add_argument("model", type=str, choices=["baseline"], help="Model to train")
+    parser.add_argument("model", type=str, choices=["baseline", "chrono"], help="Model to train")
 
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
     #parser.add_argument("--hidden", type=int, default=100, help="Hidden dimension size")
@@ -137,6 +139,7 @@ def parse_args():
     parser.add_argument("--dropout", type=float, default=0, help="Dropout rate")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay (L2 regularization)")
     #parser.add_argument("--optimizer", type=str, default="adam", choices=["sgd", "adam", "rmsprop"], help="Optimizer to use")
+    parser.add_argument("--layers", type=int, default=2, help="Number of layers in the model")
     parser.add_argument("--hidden_dim", type=int, default=64, help="Hidden dimension size")
     parser.add_argument("--device", type=str, default="cpu", choices=["cuda", "cpu"], help="Device to run training on")
     return parser.parse_args()
@@ -145,26 +148,53 @@ def parse_args():
 if __name__ == '__main__':
     args = parse_args()
 
-    if True:
-        dataset = GraphDataset(
+    if args.model == "baseline":
+        if True:
+            dataset = SunDataset(
+                root=args.dataset_path,
+                transform=NormalizeFeatures(['edge_attr'])
+            )
+            num_classes = dataset.num_classes
+        else:
+            from dataset import load_dataset_csv, sample_to_graph
+            df = load_dataset_csv(args.dataset_path)
+            dataset = []
+            for sample_name, group in df.groupby('sample'):
+                dataset.append(sample_to_graph(group))
+                print(f"Processed sample: {sample_name}")
+
+            print("First sample:", dataset[0])
+            print("First sample:", dataset[0].edge_attr)
+
+            labels =  df['family'].unique()
+            num_classes = len(labels)
+            normalize_data(dataset)
+
+        def make_model(hidden_dim, dropout, device, nlayers=2):
+            return GraphClassifier(
+                edge_dim=dataset[0].edge_attr.size(1),
+                hidden_dim=hidden_dim,
+                num_classes=num_classes,
+                dropout=dropout,
+                nlayers=nlayers,
+            ).to(device)
+
+    elif args.model == "chrono":
+        print("Chrono model")
+        dataset = ChronoDataset(
             root=args.dataset_path,
-            transform=NormalizeFeatures(['edge_attr'])
+            transform=NormalizeFeatures()
         )
         num_classes = dataset.num_classes
-    else:
-        from dataset import load_dataset_csv, sample_to_graph
-        df = load_dataset_csv(args.dataset_path)
-        dataset = []
-        for sample_name, group in df.groupby('sample'):
-            dataset.append(sample_to_graph(group))
-            print(f"Processed sample: {sample_name}")
 
-        print("First sample:", dataset[0])
-        print("First sample:", dataset[0].edge_attr)
+        def make_model(hidden_dim, dropout, device, nlayers=2):
+            return ChronoClassifier(
+                input_dim=dataset[0].num_node_features,
+                hidden_dim=hidden_dim,
+                num_classes=num_classes,
+                num_layers=nlayers,
+            ).to(device)
 
-        labels =  df['family'].unique()
-        num_classes = len(labels)
-        normalize_data(dataset)
 
     print("First normal sample:", dataset[0])
     class_weights = compute_class_weights(dataset)
@@ -182,12 +212,12 @@ if __name__ == '__main__':
 
     device = torch.device(args.device)
 
-    model = GraphClassifier(
-        edge_dim=train_dataset[0].edge_attr.size(1),
+    model = make_model(
         hidden_dim=args.hidden_dim,
-        num_classes=num_classes,
         dropout=args.dropout,
-    ).to(device)
+        device=device,
+        nlayers=args.layers,
+    )
 
     # optimizer = torch.optim.Adam([
     #     dict(params=model.conv1.parameters(), weight_decay=5e-4),

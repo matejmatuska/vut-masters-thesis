@@ -3,7 +3,7 @@ import networkx as nx
 
 import torch
 import torch.nn as nn
-from torch_geometric.nn import GCNConv, global_max_pool, global_mean_pool, MessagePassing, NNConv
+from torch_geometric.nn import global_max_pool, global_mean_pool, MessagePassing
 from torch_geometric.utils import add_self_loops
 from collections import defaultdict
 
