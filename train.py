@@ -40,13 +40,14 @@ def split_dataset(dataset, train_ratio=0.8, seed=42):
     return train_dataset, test_dataset
 
 
-def train(model, train_loader, optimizer, class_weights):
+def train(model, train_loader, optimizer, class_weights, device):
     model.train()
 
     total_loss = 0
 
     for data in train_loader:
         optimizer.zero_grad()
+        data = data.to(device)
         out = model(data)
         loss = F.cross_entropy(out, data.y, weight=class_weights)
         loss.backward()
@@ -56,7 +57,7 @@ def train(model, train_loader, optimizer, class_weights):
     return total_loss / len(train_loader)
 
 
-def test(model, test_loader, class_weights, last_epoch=False):
+def test(model, test_loader, class_weights, device, last_epoch=False):
     model.eval()
     all_preds = []
     all_labels = []
@@ -67,6 +68,7 @@ def test(model, test_loader, class_weights, last_epoch=False):
 
     with torch.no_grad():
         for data in test_loader:
+            data = data.to(device)
             out = model(data)
             loss = F.cross_entropy(out, data.y, weight=class_weights)
             total_loss += loss.item()
@@ -79,10 +81,8 @@ def test(model, test_loader, class_weights, last_epoch=False):
             correct += (predicted == data.y).sum().item()
 
     if last_epoch:
-        all_preds = torch.cat(all_preds)
         all_labels = torch.cat(all_labels)
-        all_preds = all_preds.numpy()
-        all_labels = all_labels.numpy()
+        all_preds = torch.cat(all_preds)
 
         conf_matrix = confusion_matrix(all_labels, all_preds)
         log_conf_matrix(conf_matrix, epoch)
@@ -170,14 +170,14 @@ if __name__ == '__main__':
             num_classes = len(labels)
             normalize_data(dataset)
 
-        def make_model(hidden_dim, dropout, device, nlayers=2):
+        def make_model(hidden_dim, dropout, nlayers=2):
             return GraphClassifier(
                 edge_dim=dataset[0].edge_attr.size(1),
                 hidden_dim=hidden_dim,
                 num_classes=num_classes,
                 dropout=dropout,
                 nlayers=nlayers,
-            ).to(device)
+            )
 
     elif args.model == "chrono":
         print("Chrono model")
@@ -187,14 +187,15 @@ if __name__ == '__main__':
         )
         num_classes = dataset.num_classes
 
-        def make_model(hidden_dim, dropout, device, nlayers=2):
+        def make_model(hidden_dim, dropout, nlayers=2):
             return ChronoClassifier(
                 input_dim=dataset[0].num_node_features,
                 hidden_dim=hidden_dim,
                 num_classes=num_classes,
                 num_layers=nlayers,
-            ).to(device)
+            )
 
+    device = torch.device(args.device)
 
     print("First normal sample:", dataset[0])
     class_weights = compute_class_weights(dataset)
@@ -210,14 +211,12 @@ if __name__ == '__main__':
     print('Train size: ', len(train_dataset))
     print('Test size: ', len(test_dataset))
 
-    device = torch.device(args.device)
 
     model = make_model(
         hidden_dim=args.hidden_dim,
         dropout=args.dropout,
-        device=device,
         nlayers=args.layers,
-    )
+    ).to(device)
 
     # optimizer = torch.optim.Adam([
     #     dict(params=model.conv1.parameters(), weight_decay=5e-4),
@@ -237,8 +236,8 @@ if __name__ == '__main__':
         times = []
         for epoch in range(1, args.epochs + 1):
             start = time.time()
-            train_loss = train(model, train_loader, optimizer, class_weights)
-            test_loss, acc = test(model, test_loader, class_weights, epoch == args.epochs)
+            train_loss = train(model, train_loader, optimizer, class_weights, device)
+            test_loss, acc = test(model, test_loader, class_weights, device, epoch == args.epochs)
 
             if acc > best_acc:
                 best_acc = acc
