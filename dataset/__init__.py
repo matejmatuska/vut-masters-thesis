@@ -294,3 +294,97 @@ class ChronoDataset(BaseGraphDataset):
         data.y = torch.tensor([label], dtype=torch.long)
         print(data)
         return data
+
+
+class Repr1Dataset(BaseGraphDataset):
+
+    def row_to_graph(
+        self,
+        df,
+        attributes=[
+            'PACKETS',
+            'PACKETS_REV',
+            'BYTES',
+            'BYTES_REV',
+            # TODO 'TCP_FLAGS',
+            # TODO 'TCP_FLAGS_REV',
+            'PROTOCOL',
+            'SRC_PORT',
+            'DST_PORT',
+            # TODO experiment with these more
+        ],
+    ):
+        """
+        Convert a row of dataset DataFrame to HeteroData.
+        """
+
+        def pad_ppi(series, to_len=30, value=0):
+            return np.pad(series, (0, to_len - len(series)), 'constant', constant_values=value)
+
+        flow_attrs = []
+        host_ip_to_id = {}
+        edges_host_to_flow = [[], []]  # [host_idx, flow_idx]
+        edges_flow_to_host = [[], []]  # [flow_idx, host_idx]
+        edges_flow_to_flow = [[], []]  # [flow_idx_src, flow_idx_dst]
+
+        current_host_id = 0
+        current_flow_id = 0
+
+        for _, row in df.iloc[0:].iterrows():  # TODO do we need sorting?
+            for ip in [row['SRC_IP'], row['DST_IP']]:
+                if ip not in host_ip_to_id:
+                    host_ip_to_id[ip] = current_host_id
+                    current_host_id += 1
+
+            src_id = host_ip_to_id[row['SRC_IP']]
+            dst_id = host_ip_to_id[row['DST_IP']]
+
+            attrs = row[attributes].to_dict()
+            attr_vals = list(attrs.values())
+            attr_vals.extend(pad_ppi(row['PPI_PKT_LENGTHS'], value=0))
+            attr_vals.extend(pad_ppi(row['PPI_PKT_DIRECTIONS'], value=0))
+            attr_vals.extend(pad_ppi(row['PPI_PKT_TIMES'], value=0))
+            flow_attrs.append(attr_vals)
+
+            edges_host_to_flow[0] += [src_id, dst_id]
+            edges_host_to_flow[1] += [current_flow_id, current_flow_id]
+
+            edges_flow_to_host[0] += [current_flow_id, current_flow_id]
+            edges_flow_to_host[1] += [src_id, dst_id]
+            current_flow_id += 1
+
+        for i in range(current_flow_id - 2):
+            edges_flow_to_flow[0] += [i, i + 1]
+            edges_flow_to_flow[1] += [i + 1, i]
+
+        data = HeteroData()
+        data["NetworkFlow"].x = torch.tensor(flow_attrs, dtype=torch.float)
+        data["Host"].node_ids = torch.arange(len(host_ip_to_id), dtype=torch.long)
+        data[("Host", "communicates", "NetworkFlow")].edge_index = torch.tensor(
+            edges_host_to_flow, dtype=torch.long
+        )
+        data[("NetworkFlow", "related", "NetworkFlow")].edge_index = torch.tensor(
+            edges_flow_to_flow, dtype=torch.long
+        )
+        data[("NetworkFlow", "communicates", "Host")].edge_index = torch.tensor(
+            edges_flow_to_host, dtype=torch.long
+        )
+        return data
+
+    @override
+    def sample_to_graph(self, df):
+        graph = self.row_to_graph(df)
+        print(graph)
+        if len(graph) == 0:
+            return None
+
+        label = df["label_encoded"].iloc[0]
+
+        # data = from_networkx(graph, group_node_attrs='all')
+        # print(data.x)
+        # data.edge_attr = torch.tensor(
+        #    [list(graph.edges[edge].values()) for edge in graph.edges], dtype=torch.float32
+        #)
+        graph.y = torch.tensor([label], dtype=torch.long)
+        # print(data)
+        return graph
