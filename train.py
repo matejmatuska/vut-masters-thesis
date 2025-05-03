@@ -17,10 +17,11 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix
 from torch_geometric.transforms import NormalizeFeatures
 
-from dataset import ChronoDataset, SunDataset
+from dataset import ChronoDataset, Repr1Dataset, SunDataset
 
 from model.baseline import GraphClassifier
 from model.chrono import ChronoClassifier
+from model.repr1 import Repr1Classifier
 
 
 def split_dataset(dataset, train_ratio=0.8, seed=42):
@@ -130,7 +131,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Training script arguments")
 
     parser.add_argument("dataset_path", type=str, help="Path to the dataset")
-    parser.add_argument("model", type=str, choices=["baseline", "chrono"], help="Model to train")
+    parser.add_argument("model", type=str, choices=["baseline", "chrono", "repr1"], help="Model to train")
 
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
     #parser.add_argument("--hidden", type=int, default=100, help="Hidden dimension size")
@@ -194,6 +195,24 @@ if __name__ == '__main__':
                 num_classes=num_classes,
                 num_layers=nlayers,
             )
+    elif args.model == "repr1":
+        print("Repr1 model")
+        dataset = Repr1Dataset(
+            root=args.dataset_path,
+            transform=NormalizeFeatures()
+        )
+        num_classes = dataset.num_classes
+
+        def make_model(hidden_dim, dropout, nlayers=2):
+            return Repr1Classifier(
+                num_hosts=0, # TODO unused
+                in_channels_flow=97,
+                hidden_dim=hidden_dim,
+                num_classes=num_classes,
+            )
+    else:
+        # should not reach here, handled by argparse
+        raise ValueError("Invalid model type. Choose 'baseline', 'chrono' or 'repr1'.")
 
     device = torch.device(args.device)
 
