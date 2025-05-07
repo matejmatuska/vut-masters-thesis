@@ -50,6 +50,7 @@ class Repr1Classifier(torch.nn.Module):
 
         #x_host = torch.zeros((data.num_nodes, 1))  # dummy node features
         #x_flow = self.lin_flow(data['NetworkFlow'].x)
+
         x_dict = {'Host': x_host, 'NetworkFlow': data['NetworkFlow'].x}
 
         for i in range(len(self.convs) - 1):

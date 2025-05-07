@@ -9,7 +9,7 @@ from collections import defaultdict
 
 
 class EdgeMPNN(MessagePassing):
-    def __init__(self,  edge_mlp, dropout=0):
+    def __init__(self, edge_mlp, dropout):
         super().__init__(aggr='sum')
         self.edge_mlp = edge_mlp
 
@@ -25,8 +25,8 @@ class EdgeMPNN(MessagePassing):
         return x_j + edge_attr
 
 
-class GraphClassifier(torch.nn.Module):
-    def __init__(self, edge_dim, hidden_dim, num_classes, dropout=0):
+class GraphClassifier(torch.nn.Module):  # TODO better names
+    def __init__(self, edge_dim, hidden_dim, num_classes, layers, dropout=0):
         super().__init__()
         self.edge_mlp = torch.nn.Sequential(
             torch.nn.Linear(edge_dim, hidden_dim),
@@ -37,7 +37,7 @@ class GraphClassifier(torch.nn.Module):
             torch.nn.Dropout(dropout),
             torch.nn.Linear(hidden_dim, hidden_dim),
         )
-        self.gnn_layers = nn.ModuleList([EdgeMPNN(self.edge_mlp, dropout) for _ in range(1)])
+        self.gnn_layers = nn.ModuleList([EdgeMPNN(self.edge_mlp, dropout) for _ in range(layers)])
         #self.gnn = EdgeMPNN(edge_dim, self.edge_mlp, dropout=dropout)
         self.pool = global_max_pool
         self.classifier = torch.nn.Sequential(

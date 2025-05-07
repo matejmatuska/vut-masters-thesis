@@ -155,7 +155,6 @@ if __name__ == '__main__':
                 root=args.dataset_path,
                 transform=NormalizeFeatures(['edge_attr'])
             )
-            num_classes = dataset.num_classes
         else:
             from dataset import load_dataset_csv, sample_to_graph
             df = load_dataset_csv(args.dataset_path)
@@ -175,25 +174,23 @@ if __name__ == '__main__':
             return GraphClassifier(
                 edge_dim=dataset[0].edge_attr.size(1),
                 hidden_dim=hidden_dim,
-                num_classes=num_classes,
+                num_classes=dataset.num_classes,
+                layers=nlayers,
                 dropout=dropout,
-                nlayers=nlayers,
             )
-
     elif args.model == "chrono":
         print("Chrono model")
         dataset = ChronoDataset(
             root=args.dataset_path,
             transform=NormalizeFeatures()
         )
-        num_classes = dataset.num_classes
-
         def make_model(hidden_dim, dropout, nlayers=2):
             return ChronoClassifier(
                 input_dim=dataset[0].num_node_features,
                 hidden_dim=hidden_dim,
-                num_classes=num_classes,
-                num_layers=nlayers,
+                num_classes=dataset.num_classes,
+                layers=nlayers,
+                dropout=dropout,
             )
     elif args.model == "repr1":
         print("Repr1 model")
@@ -201,19 +198,20 @@ if __name__ == '__main__':
             root=args.dataset_path,
             transform=NormalizeFeatures()
         )
-        num_classes = dataset.num_classes
-
         def make_model(hidden_dim, dropout, nlayers=2):
             return Repr1Classifier(
+                input_dim=97,
                 num_hosts=0, # TODO unused
-                in_channels_flow=97,
                 hidden_dim=hidden_dim,
-                num_classes=num_classes,
+                num_classes=dataset.num_classes,
+                layers=nlayers,
+                dropout=dropout,
             )
     else:
         # should not reach here, handled by argparse
         raise ValueError("Invalid model type. Choose 'baseline', 'chrono' or 'repr1'.")
 
+    num_classes = dataset.num_classes
     device = torch.device(args.device)
 
     print("First normal sample:", dataset[0])

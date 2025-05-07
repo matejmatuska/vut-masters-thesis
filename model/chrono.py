@@ -4,10 +4,10 @@ from torch_geometric.nn import GCNConv, global_mean_pool, global_max_pool
 
 
 class ChronoClassifier(torch.nn.Module):
-    def __init__(self, input_dim, hidden_dim, num_classes, num_layers=3):
+    def __init__(self, input_dim, hidden_dim, num_classes, layers, dropout=0.0):
         super().__init__()
         self.convs = torch.nn.ModuleList()
-        self.dropout = 0.05
+        self.dropout = dropout
 
         self.convs.append(GCNConv(input_dim, hidden_dim))
         self.convs.append(GCNConv(hidden_dim, hidden_dim // 2))
