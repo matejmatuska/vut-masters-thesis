@@ -10,6 +10,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.utils.class_weight import compute_class_weight
 from torch_geometric.loader import DataLoader
 from torch_geometric.logging import log
+from torch_geometric.transforms import NormalizeFeatures
 
 from dataset import ChronoDataset, Repr1Dataset, SunDataset
 from model.baseline import GraphClassifier
@@ -117,7 +118,6 @@ def get_dataset_factory(which) -> (callable):
                 root,
                 split,
                 **kwargs,
-                # transform=NormalizeFeatures(['edge_attr'])
             )
     elif which == "chrono":
         def creator(root, split, **kwargs) -> ChronoDataset:
@@ -125,7 +125,6 @@ def get_dataset_factory(which) -> (callable):
                 root,
                 split,
                 **kwargs,
-                # transform=NormalizeFeatures()
             )
     elif which == "repr1":
         def creator(root, split, **kwargs) -> Repr1Dataset:
@@ -133,7 +132,6 @@ def get_dataset_factory(which) -> (callable):
                 root,
                 split,
                 **kwargs,
-                # transform=NormalizeFeatures()
             )
     else:
         raise ValueError("Invalid model type. Choose 'baseline', 'chrono' or 'repr1'.")
