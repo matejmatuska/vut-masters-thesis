@@ -6,7 +6,6 @@ import mlflow
 import numpy as np
 import seaborn as sns
 import torch
-import torch.nn.functional as F
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.utils.class_weight import compute_class_weight
 from torch_geometric.loader import DataLoader
@@ -18,7 +17,7 @@ from model.chrono import ChronoClassifier
 from model.repr1 import Repr1Classifier
 
 
-def train(model, train_loader, optimizer, class_weights, device):
+def train(model, train_loader, optimizer, criterion, device):
     model.train()
 
     total_loss = 0
@@ -27,7 +26,7 @@ def train(model, train_loader, optimizer, class_weights, device):
         optimizer.zero_grad()
         data = data.to(device)
         out = model(data)
-        loss = F.cross_entropy(out, data.y, weight=class_weights)
+        loss = criterion(out, data.y)
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
@@ -35,7 +34,7 @@ def train(model, train_loader, optimizer, class_weights, device):
     return total_loss / len(train_loader)
 
 
-def test(model, test_loader, class_weights, device, last_epoch=False):
+def validate(model, test_loader, criterion, device, last_epoch=False):
     model.eval()
     all_preds = []
     all_labels = []
@@ -48,7 +47,7 @@ def test(model, test_loader, class_weights, device, last_epoch=False):
         for data in test_loader:
             data = data.to(device)
             out = model(data)
-            loss = F.cross_entropy(out, data.y, weight=class_weights)
+            loss = criterion(out, data.y)
             total_loss += loss.item()
 
             _, predicted = torch.max(out, 1)
@@ -220,10 +219,10 @@ if __name__ == '__main__':
     # ], lr=learning_rate)  # Only perform weight-decay on first convolution.
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate,
                                  weight_decay=args.weight_decay)
+    criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
 
     mlflow.set_tracking_uri(uri="http://localhost:5000")
     mlflow.set_experiment("xmatus36-gnns")
-
     with mlflow.start_run():
         mlflow.log_param('num_classes', num_classes)
         mlflow.log_params(vars(args))
@@ -233,9 +232,9 @@ if __name__ == '__main__':
         for epoch in range(1, args.epochs + 1):
             start = time.time()
 
-            train_loss = train(model, train_loader, optimizer, class_weights, device)
+            train_loss = train(model, train_loader, optimizer, criterion, device)
 
-            test_loss, acc = validate(model, val_loader, class_weights, device, epoch == args.epochs)
+            test_loss, acc = validate(model, val_loader, criterion, device, epoch == args.epochs)
 
             if acc > best_acc:
                 best_acc = acc
