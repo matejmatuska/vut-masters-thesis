@@ -157,15 +157,30 @@ def train_val_test_split(
     """
     Split the dataset into train, validation, and test sets in a stratified manner.
     """
-    train_df, temp_df = train_test_split(
-        df, test_size=val_size + test_size, stratify=df["family"], random_state=42
+     # Get unique samples and their family labels
+    sample_df = df[['sample', 'family']].drop_duplicates()
+
+    # First split: train and temp (val + test)
+    train_samples, temp_samples = train_test_split(
+        sample_df,
+        test_size=val_size + test_size,
+        stratify=sample_df['family'],
+        random_state=random_state
     )
-    val_df, test_df = train_test_split(
-        temp_df,
+
+    # Second split: validation and test from temp
+    val_samples, test_samples = train_test_split(
+        temp_samples,
         test_size=test_size / (val_size + test_size),
-        stratify=temp_df["family"],
-        random_state=random_state,
+        stratify=temp_samples['family'],
+        random_state=random_state
     )
+
+    # Map back to full DataFrame
+    train_df = df[df['sample'].isin(train_samples['sample'])]
+    val_df = df[df['sample'].isin(val_samples['sample'])]
+    test_df = df[df['sample'].isin(test_samples['sample'])]
+
     return train_df, val_df, test_df
 
 
