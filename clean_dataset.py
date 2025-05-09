@@ -280,4 +280,4 @@ if __name__ == "__main__":
         sys.exit(1)
 
     df = run(path, output_dir)
-    df.to_csv(os.path.join(output_dir, "dataset.csv"), index=False)
+    df.to_csv(os.path.join(output_dir, "dataset-clean.csv"), index=False)

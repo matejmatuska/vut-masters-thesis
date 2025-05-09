@@ -7,7 +7,7 @@
 #### DATASET
 # The dataset should be extracted to a directory with the following structure:
 #   $1/extracted/2024072?/<family>/*.{pcapng,pcap,...}
-# NOTE: there is no Malware/ part before the date directories,
+# NOTE: there is no 'Malware/' part before the date directories,
 #   you can use the following command to extract the dataset:
 #   tar -xvf --strip-components=1 dataset.tar -C $1/extracted
 
@@ -30,6 +30,8 @@
 # ./runall.sh <work-dir>
 #    work-dir - the directory containing the extracted subdirectoryt where the
 #               dataset is extracted and the outputs will be written
+
+set -o pipefail
 
 DATASET_DIR="$1"
 if [ -z "$DATASET_DIR" ]; then
@@ -64,12 +66,20 @@ pushd "$DATASET_DIR" || exit 1
 stage "Unpacking archives to $EXTRACT_DIR ..."
 for i in {3..4}; do
     file="$DATASET_DIR/Malware-2024072$i.tar.gz"
+    if [ ! -f "$file" ]; then
+        echo "File $file not found, skipping."
+        continue
+    fi
     echo "Unpacking $file ..." | tee -a "$LOG_FILE"
     tar --strip-components=1 -xzvf "$file" -C "$EXTRACT_DIR" >> "$LOG_FILE" @>&1 || exit 1
 done
 
 for i in {5..8}; do
     file="$DATASET_DIR/Malware-2024072$i.tar"
+    if [ ! -f "$file" ]; then
+        echo "File $file not found, skipping."
+        continue
+    fi
     echo "Unpacking $file ..." | tee -a "$LOG_FILE"
     tar --strip-components=1 -xvf "$file" -C "$EXTRACT_DIR" >> "$LOG_FILE" 2>&1 || exit 1
 done
@@ -94,8 +104,8 @@ find "$EXTRACT_DIR" -name '2407*' -type f -print0 |
 
 
 stage "Combining date directories in $EXTRACT_DIR to $COMBINE_DIR ..."
- this will sometimes print out error because not all family directories are
- present in all date directories
+# this will sometimes print out error because not all family directories are
+# present in all date directories
 for dir in "$EXTRACT_DIR"/2024072?; do
     for fam in "$dir"/*; do
         mkdir -p "$COMBINE_DIR/$(basename "$fam")"
@@ -111,8 +121,14 @@ podman run --rm -ti -v "$WORKDIR":/data:z "$CONTAINER" \
 
 popd || exit 1
 
-stage "Filtering files in $PRE_FILTER_DIR to $OUT_DIR ..."
-python "clean_dataset.py" "$PRE_FILTER_DIR" "$OUT_DIR" || exit 1
 
+stage "Filtering files in $PRE_FILTER_DIR to $OUT_DIR ..."
+python scripts/clean_dataset.py "$PRE_FILTER_DIR" "$OUT_DIR" || exit 1
+
+
+stage "Preparing for training $OUT_DIR/dataset-clean.csv -> $OUT_DIR/raw ..."
+python scripts/prep_dataset.py "$OUT_DIR/dataset-clean.csv" "$OUT_DIR/raw" || exit 1
 
 stage "Done. Outputs written to $OUT_DIR"
+
+# TODO add the training process
