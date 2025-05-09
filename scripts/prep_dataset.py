@@ -325,10 +325,12 @@ if __name__ == "__main__":
         sys.exit(1)
 
     train, val, test = main(path)
+    train.to_parquet(os.path.join(output_dir, "train.parquet"), index=False)
     train.to_csv(os.path.join(output_dir, "train.csv"), index=False)
+    val.to_parquet(os.path.join(output_dir, "val.parquet"), index=False)
     val.to_csv(os.path.join(output_dir, "val.csv"), index=False)
+    test.to_parquet(os.path.join(output_dir, "test.parquet"), index=False)
     test.to_csv(os.path.join(output_dir, "test.csv"), index=False)
-    print(f"Train: {len(train)}, Val: {len(val)}, Test: {len(test)}")
     print(f"Train: {sample_count(train)}, Val: {sample_count(val)}, Test: {sample_count(test)}")
 
     print(train.head())

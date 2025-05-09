@@ -1,3 +1,4 @@
+import os
 from abc import ABC, abstractmethod
 from typing import override
 
@@ -50,7 +51,6 @@ def load_dataset_csv(path) -> pd.DataFrame:
     :rtype: pandas.DataFrame
     """
     df = pd.read_csv(path)
-    df = _parse_ppi(df)
     df["label_encoded"], _ = pd.factorize(df["family"])
     print(f'Encoded familites: {df.groupby("family")["label_encoded"].first()}')
     return df
@@ -75,7 +75,7 @@ class BaseGraphDataset(InMemoryDataset, ABC):
 
     @property
     def raw_file_names(self):
-        return ["train.csv", "test.csv", "val.csv"]
+        return ["train.parquet", "test.parquet", "val.parquet"]
 
     @property
     def processed_file_names(self):
@@ -95,11 +95,11 @@ class BaseGraphDataset(InMemoryDataset, ABC):
         pass
 
     def process(self):
-        df = load_dataset_csv(f"{self.split}.csv")
+        df = load_dataset_csv(os.path.join(self.raw_dir, f"{self.split}.parquet"))
 
         data_list = []
         for sample_name, group in df.groupby("sample"):
-            print(f"Processing sample: {sample_name}")
+            print(f"Processing sample: '{sample_name}'")
 
             # TODO these should no longer be needed
             if df.empty:
