@@ -7,6 +7,7 @@ from ast import literal_eval
 from collections import defaultdict
 
 import matplotlib.pyplot as plt
+import mlflow
 import numpy as np
 import networkx as nx
 import pandas as pd
@@ -18,13 +19,13 @@ import torch.nn.functional as F
 import torch_geometric
 from torch.utils.data import random_split
 from torch_geometric.loader import DataLoader
-from torch_geometric.logging import init_wandb, log
+from torch_geometric.logging import log
 from torch_geometric.utils import from_networkx
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix
 
-from model import GraphClassifier
+from model.baseline import GCNGraphClassifier, GraphClassifier
 
 
 def row_to_graph(
@@ -336,26 +337,28 @@ if __name__ == '__main__':
     # ], lr=learning_rate)  # Only perform weight-decay on first convolution.
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
-    init_wandb(
-        name=f'Malware (LR={args.learning_rate}, Hidden={args.batch_size})',
-        lr=args.learning_rate,
-        epochs=args.epochs,
-        hidden_channels=100,
-        device=device,
-    )
-
     best_acc = 0
     times = []
-    for epoch in range(1, args.epochs + 1):
-        start = time.time()
-        train_loss = train(model, train_loader, optimizer, class_weights)
-        test_loss, acc = test(model, test_loader, class_weights, epoch == args.epochs)
 
-        if acc > best_acc:
-            best_acc = acc
+    with mlflow.start_run():
+        mlflow.log_params(vars(args))
 
-        log(Epoch=epoch, Loss=train_loss, Val=test_loss, Acc=acc)
-        times.append(time.time() - start)
+        for epoch in range(1, args.epochs + 1):
+            start = time.time()
+            train_loss = train(model, train_loader, optimizer, class_weights)
+            test_loss, acc = test(model, test_loader, class_weights, epoch == args.epochs)
 
-    log(Best_Acc=best_acc)
-    print(f'Median time per epoch: {torch.tensor(times).median():.4f}s')
+            if acc > best_acc:
+                best_acc = acc
+
+            mlflow.log_metric('train_loss', train_loss, step=epoch)
+            mlflow.log_metric('test_loss', test_loss, step=epoch)
+            mlflow.log_metric('accuracy', acc, step=epoch)
+
+            log(Epoch=epoch, Loss=train_loss, Val=test_loss, Acc=acc)
+            times.append(time.time() - start)
+
+        log(Best_Acc=best_acc)
+        mlflow.log_metric('best_acc', best_acc)
+        mlflow.log_metric('median_epoch_time', torch.tensor(times).median())
+        print(f'Median time per epoch: {torch.tensor(times).median():.4f}s')
