@@ -106,8 +106,8 @@ def load_dataset_csv(path, store=False):
     df = pd.read_csv(path)
     df = df[~df['family'].isin(['LOKIBOT', 'XWORM', 'NETWIRE', 'SLIVER', 'AGENTTESLA', 'WARZONERAT', 'COBALTSTRIKE'])]
 
-    min_samples = 150
-    max_samples = 300
+    min_samples = 200
+    max_samples = 500
 
     sample_counts = (
         df[['family', 'sample']]
