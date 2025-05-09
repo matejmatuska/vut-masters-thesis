@@ -67,10 +67,13 @@ class BaseGraphDataset(InMemoryDataset, ABC):
         :param root: Root directory where the dataset is stored.
         :param split: Split of the dataset to load ('train', 'test', 'val').
         """
-        super().__init__(root, transform, pre_transform, pre_filter)
         if split not in ["train", "test", "val"]:
-            raise ValueError(f"Invalid split: {split}. Must be 'train', 'test', or 'val'.")
+            raise ValueError(
+                f"Invalid split: {split}. Must be 'train', 'test', or 'val'."
+            )
         self.split = split
+
+        super().__init__(root, transform, pre_transform, pre_filter)
         self.load(self.processed_paths[0])
 
     @property
@@ -126,7 +129,19 @@ class BaseGraphDataset(InMemoryDataset, ABC):
 
 class SunDataset(BaseGraphDataset):
 
+    def __init__(
+        self, root, split, transform=None, pre_transform=None, pre_filter=None
+    ):
+        """
+        Initialize the dataset.
+
+        :param root: Root directory where the dataset is stored.
+        :param split: Split of the dataset to load ('train', 'test', 'val').
+        """
+        super().__init__(root, split, transform, pre_transform, pre_filter)
+
     def _sample_to_graph(
+        self,
         df,
         attributes=_DEFAULT_ATTRIBUTES,
         aggfunc=np.mean,
@@ -175,7 +190,7 @@ class SunDataset(BaseGraphDataset):
 
     @override
     def sample_to_graph(self, df):
-        graph = row_to_graph(df, draw=False)
+        graph = self._sample_to_graph(df)
         label = df["label_encoded"].iloc[0]
 
         data = from_networkx(graph)
@@ -193,7 +208,20 @@ class SunDataset(BaseGraphDataset):
 
 class ChronoDataset(BaseGraphDataset):
 
+    def __init__(
+        self, root, split, transform=None, pre_transform=None, pre_filter=None
+    ):
+        """
+        Initialize the dataset.
+
+        :param root: Root directory where the dataset is stored.
+        :param split: Split of the dataset to load ('train', 'test', 'val').
+        """
+        super().__init__(root, split, transform, pre_transform, pre_filter)
+
+
     def _sample_to_graph(
+        self,
         df,
         attributes=_DEFAULT_ATTRIBUTES,
     ):
@@ -214,7 +242,14 @@ class ChronoDataset(BaseGraphDataset):
             curr_node = node_key(curr)
 
             prev_attrs = prev[attributes].to_dict()
+            prev_attrs["PPI_PKT_LENGTHS"] = prev["PPI_PKT_LENGTHS"]
+            prev_attrs["PPI_PKT_DIRECTIONS"] = prev["PPI_PKT_DIRECTIONS"]
+            prev_attrs["PPI_PKT_TIMES"] = prev["PPI_PKT_TIMES"]
+
             curr_attrs = curr[attributes].to_dict()
+            curr_attrs["PPI_PKT_LENGTHS"] = curr["PPI_PKT_LENGTHS"]
+            curr_attrs["PPI_PKT_DIRECTIONS"] = curr["PPI_PKT_DIRECTIONS"]
+            curr_attrs["PPI_PKT_TIMES"] = curr["PPI_PKT_TIMES"]
 
             G.add_node(prev_node, **prev_attrs)
             G.add_node(curr_node, **curr_attrs)
@@ -245,18 +280,28 @@ class ChronoDataset(BaseGraphDataset):
 
         label = df["label_encoded"].iloc[0]
         data = from_networkx(graph, group_node_attrs="all")
-        print(data.x)
         # data.edge_attr = torch.tensor(
         #    [list(graph.edges[edge].values()) for edge in graph.edges], dtype=torch.float32
         # )
         data.y = torch.tensor([label], dtype=torch.long)
-        print(data)
         return data
 
 
 class Repr1Dataset(BaseGraphDataset):
 
+    def __init__(
+        self, root, split, transform=None, pre_transform=None, pre_filter=None
+    ):
+        """
+        Initialize the dataset.
+
+        :param root: Root directory where the dataset is stored.
+        :param split: Split of the dataset to load ('train', 'test', 'val').
+        """
+        super().__init__(root, split, transform, pre_transform, pre_filter)
+
     def _sample_to_graph(
+        self,
         df,
         attributes=_DEFAULT_ATTRIBUTES,
     ):
