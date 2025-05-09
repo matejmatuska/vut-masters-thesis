@@ -10,6 +10,10 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from stitch_dns import stitch_dns
 
 
+def sample_count(df):
+    return len(df["sample"].unique())
+
+
 def _parse_ppi(df):
     # TODO better docstring
     """
@@ -189,11 +193,11 @@ def main(path):
     """
     print("Loading dataset...")
     df = pd.read_csv(path)
-    print(f"Loaded {len(df)} samples")
+    print(f"Loaded {sample_count(df)} samples")
     # df = df[~df['family'].isin(['LOKIBOT', 'XWORM', 'NETWIRE', 'SLIVER', 'AGENTTESLA', 'WARZONERAT', 'COBALTSTRIKE'])]
     print("Removing extreme packet count samples...")
     df = remove_extreme_packet_count_samples(df, min=4, max=1e6)
-    print(f"Samples after removing extreme packet counts: {len(df)}")
+    print(f"Samples after removing extreme packet counts: {sample_count(df)}")
 
     keep_cols = [
         "family",
@@ -219,22 +223,21 @@ def main(path):
     df = df[keep_cols]
     # has to be done before stitch_dns to be able to aggregate PPI cols
     df = _parse_ppi(df)
-    print(df['PPI_PKT_TIMES'].head())
 
-    print(f"Stitching DNS samples...")
+    print("Stitching DNS samples...")
     df = stitch_dns_uniflows(df)
-    print(f"Samples after stitching: {len(df)}")
+    print(f"Samples after stitching: {sample_count(df)}")
 
     print("Removing DNS-only samples...")
     df = remove_dns_only_samples(df)
-    print(f"Samples after removing DNS-only: {len(df)}")
+    print(f"Samples after removing DNS-only: {sample_count(df)}")
 
     print("Capping samples per family...")
     # WARN: there is no check of whether there is enough samples
     df = cap_samples_per_fam(df, 500, 2000)
     print(df[["family", "sample"]].drop_duplicates()["family"].value_counts())
     print(df[["family", "sample"]].drop_duplicates()["family"].value_counts().sum())
-    print(f"Samples after capping: {len(df)}")
+    print(f"Samples after capping: {sample_count(df)}")
 
     if len(df) == 0:
         print("Empty dataset, nothing to do. Make sure there is enough samples.")
@@ -324,5 +327,6 @@ if __name__ == "__main__":
     val.to_csv(os.path.join(output_dir, "val.csv"), index=False)
     test.to_csv(os.path.join(output_dir, "test.csv"), index=False)
     print(f"Train: {len(train)}, Val: {len(val)}, Test: {len(test)}")
+    print(f"Train: {sample_count(train)}, Val: {sample_count(val)}, Test: {sample_count(test)}")
 
     print(train.head())
