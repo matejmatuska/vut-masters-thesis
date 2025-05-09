@@ -44,21 +44,18 @@ def cap_samples_per_fam(df, min_samples, max_samples) -> pd.DataFrame:
     :type max_samples: int
     :return: The capped dataset.
     """
-    print("DGB: assuming there is enough samples")
     # remove families with small saples < samples[0]
     sample_counts = df[["family", "sample"]].drop_duplicates().groupby("family").size()
     enough_samples = sample_counts[sample_counts >= min_samples].index
     df_enough = df[df["family"].isin(enough_samples)]
 
     # cap the number of samples per family to samples[1]
-    print(df_enough[["family", "sample"]].head())
     has_more = (
         df_enough[["family", "sample"]]
         .drop_duplicates()
         .groupby("family", group_keys=False)
         .apply(lambda x: x.sample(n=min(len(x), max_samples)))
     )
-    print(has_more.head())
     return df_enough.merge(has_more, on=["family", "sample"])
 
 
@@ -132,7 +129,7 @@ def normalize(df, per_packet_len=30, scalerf=MinMaxScaler) -> pd.DataFrame:
 
     def pad_or_truncate(lst, to_len, value=0):
         lst = lst[:to_len]
-        pad_width = max(0, 30 - len(lst))
+        pad_width = max(0, to_len - len(lst))
         return np.pad(lst, (0, pad_width), "constant", constant_values=value)
 
     # Ensure fixed-length arrays (padding or truncating to 30)
@@ -140,22 +137,12 @@ def normalize(df, per_packet_len=30, scalerf=MinMaxScaler) -> pd.DataFrame:
     for col in ["PPI_PKT_TIMES", "PPI_PKT_LENGTHS", "PPI_PKT_DIRECTIONS"]:
         df[col] = df[col].apply(pad_or_truncate, args=(per_packet_len, 0))
 
-    def norm_arr(arr):
-        scaler = scalerf()
-        return scaler.fit_transform(arr.reshape(-1, 1)).flatten()
-
-    def norm_arr_log(arr):
-        arr = np.log1p(np.array(arr))
-        scaler = scalerf()
-        return scaler.fit_transform(arr.reshape(-1, 1)).flatten()
-
     def norm_2d(col):
         X = np.vstack(col.values)  # shape: (num_rows, 30)
         scaled = StandardScaler().fit_transform(X)
         return scaled.tolist()
 
-
-    df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].apply(norm_arr)
+    df["PPI_PKT_LENGTHS"] = norm_2d(df["PPI_PKT_LENGTHS"])
     df["PPI_PKT_TIMES"] = norm_2d(df["PPI_PKT_TIMES"])
 
     # def normalize_times(timestamps):
