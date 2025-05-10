@@ -1,6 +1,7 @@
-import os
-import sys
 import time
+
+from ast import literal_eval
+from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,44 +17,32 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.logging import init_wandb, log
 from torch_geometric.utils import from_networkx
 
+from sklearn.preprocessing import StandardScaler
+
 from model import GraphClassifier
 
-def load_csv(csv):
-    try:
-        df = pd.read_csv(csv)
-    except pd.errors.EmptyDataError:
-        print("Empty file")
-        return None
 
-    print(df.head())
-    # remove the datatype, this could be done when creating the csv
-    df.columns = df.columns.str.split().str[1]
-    print(df.columns)
-    return df
+def row_to_graph(
+    df,
+    draw=False,
+    attributes=['PACKETS', 'BYTES', 'TCP_FLAGS', 'TCP_FLAGS_REV', 'DST_PORT', 'PROTOCOL', 'SRC_PORT'],
+):
+    """
+    Convert a row of dataset DataFrame to a digraph.
+    """
+    def pad_ppi(ppi_str, to_len=30, value=0):
+        return np.pad(ppi_str, (0, to_len - len(ppi_str)), 'constant', constant_values=value)
 
-
-def to_graph(df, draw=False):
-    G = nx.DiGraph()
+    G = nx.MultiDiGraph()
     # Populate the graph with nodes and edges from the DataFrame
     for _, row in df.iterrows():
         src_ip = row['SRC_IP']
         dst_ip = row['DST_IP']
-        edge_attr = {
-            #'source_port': row['source_port'],
-            #'destination_port': row['destination_port'],
-            # 'protocol': row['PROTOCOL'],
-            'packets': row['PACKETS'],
-            'bytes': row['BYTES'],
-            'tcp_flags': row['TCP_FLAGS'],
-            'tcp_flags_reverse': row['TCP_FLAGS_REV'],
-            'dst_port': row['DST_PORT'],
-        }
+        edge_attr = {attr: row[attr] for attr in attributes}
 
-        # Add nodes if they don't exist
-        #if src_ip not in G:
-        G.add_node(src_ip)
-        #if dst_ip not in G:
-        G.add_node(dst_ip)
+        edge_attr['PPI_PKT_LENGTHS'] = pad_ppi(row['PPI_PKT_LENGTHS'], value=-1)
+        #edge_attr['PPI_PKT_TIMES'] = pad_ppi(row['PPI_PKT_TIMES'], value=0)
+        #print(edge_attr['PPI_PKT_TIMES'])
 
         # Add edge with attributes
         G.add_edge(src_ip, dst_ip, **edge_attr)
@@ -65,43 +54,91 @@ def to_graph(df, draw=False):
         nx.draw(G, pos, with_labels=True, node_color='skyblue', node_size=2000, font_size=10)
         nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
         plt.show()
-    return G
 
 
-def make_graph(df, label):
-    graph = to_graph(df, draw=False)
+    def aggregate_edges(graph, aggfunc=np.mean) -> nx.DiGraph:
+        """
+        Aggregate edges of a multi-digraph to a standard di-graph.
+        """
+        ret = nx.DiGraph()
+        edge_data = defaultdict(lambda: defaultdict(list))
 
+        for u, v, data in graph.edges(data=True):
+            for key, val in data.items():
+                edge_data[(u, v)][key].append(val)
+
+        for (u, v), data in edge_data.items():
+            agg_data = {key: aggfunc(val_list) for key, val_list in data.items()}
+            ret.add_edge(u, v, **agg_data)
+
+        return ret
+
+    agg_G = aggregate_edges(G)
+    assert not any(nx.isolates(agg_G))
+    return agg_G
+
+
+def sample_to_graph(df):
+    graph = row_to_graph(df, draw=False)
+    label = df['label_encoded'].iloc[0]
+
+    # make torch data
     data = from_networkx(graph)
     data.edge_attr = torch.tensor([list(graph.edges[edge].values()) for edge in graph.edges], dtype=torch.float32)
     # TODO add the label to the graph
     data.y = torch.tensor([label], dtype=torch.long)
 
-    print('=== Pytorch Graph ===')
 
-    print(data)
-    print(data.edge_attr)
-    print(data.y)
     return data
 
 
-def load_dataset(path, store=False):
+def load_dataset_csv(path, store=False):
+    """
+    Load a dataset from a CSV file.
+    """
     dataset = []
+    df = pd.read_csv(path)
+    df = df[~df['family'].isin(['LOKIBOT', 'XWORM', 'NETWIRE', 'SLIVER', 'AGENTTESLA', 'WARZONERAT', 'COBALTSTRIKE'])]
 
-    path = sys.argv[1]
-    families = [os.path.join(path, f) for f in os.listdir(path)]
+    min_samples = 150
+    max_samples = 300
 
-    label_map = {value.split('/')[-1]: index for index, value in enumerate(families, start=0)}
+    sample_counts = (
+        df[['family', 'sample']]
+            .drop_duplicates()  # Get unique family-sample combinations
+            .groupby('family')  # Group by family
+            .size()  # Count the number of unique samples per family
+    )
 
-    for family in families:
-        file_list = [os.path.join(family, f) for f in os.listdir(family) if f.endswith('.csv')]
-        label = label_map[family.split('/')[-1]]
-        for f in file_list:
-            df = load_csv(f)
-            if (df is not None):
-                print('=== Processing', f, '===')
-                dataset.append(make_graph(df, label))
-            else:
-                print('=== Skipping', f, '===')
+    # filter families that meet the minimum sample requirement
+    valid_families = sample_counts[sample_counts >= min_samples].index
+
+    # filter the original DataFrame to keep only valid families
+    df_filtered = df[df['family'].isin(valid_families)]
+    print(df_filtered)
+
+    # reduce samples per family to the max limit
+    selected_samples = (
+        df_filtered[['family', 'sample']].drop_duplicates()
+            .groupby('family', group_keys=False)
+            .apply(lambda x: x.sample(n=min(len(x), max_samples)))
+    )
+
+    # merge to keep only flows from selected samples
+    df = df_filtered.merge(selected_samples, on=['family', 'sample'])
+    print(df[['family', 'sample']].drop_duplicates()['family'].value_counts())
+    print(df[['family', 'sample']].drop_duplicates()['family'].value_counts().sum())
+
+
+    df['label_encoded'], _ = pd.factorize(df['family'])
+    print(f'Encoded familites: {df.groupby("family")["label_encoded"].first()}')
+
+    df['PPI_PKT_LENGTHS'] = df['PPI_PKT_LENGTHS'].str.replace('|', ',')
+    df['PPI_PKT_LENGTHS'] = df['PPI_PKT_LENGTHS'].apply(literal_eval)
+
+    for sample_name, group in df.groupby('sample'):
+        dataset.append(sample_to_graph(group))
+
 
     # TODO what's a good split ratio?
     train_size = int(0.8 * len(dataset))
@@ -114,56 +151,99 @@ def load_dataset(path, store=False):
         torch.save(train_dataset, 'train.pt')
         torch.save(test_dataset, 'test.pt')
 
-    return train_dataset, test_dataset, label_map
+    return train_dataset, test_dataset, df['family'].unique()
 
 
-def train(model, train_loader, optimizer):
+
+def train(model, train_loader, optimizer, class_weights):
     model.train()
+
     total_loss = 0
+
     for data in train_loader:
         optimizer.zero_grad()
         out = model(data)
-        print('out:', out)
-        print('labels', data.y)
-        loss = F.cross_entropy(out, data.y)
+        loss = F.cross_entropy(out, data.y, weight=class_weights)
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
-        #print(loss.item())
-    return total_loss / (len(train_loader) * 32)
+
+    return total_loss / len(train_loader)
 
 
-def test(model, test_loader):
+def test(model, test_loader, class_weights, last_epoch=False):
     model.eval()
+    all_preds = []
+    all_labels = []
 
+    total_loss = 0
     correct = 0
+    total = 0
 
     with torch.no_grad():
         for data in test_loader:
             out = model(data)
-            pred = out.argmax(dim=1)
-            print(pred)
-            correct += (pred == data.y).sum().item()
+            loss = F.cross_entropy(out, data.y, weight=class_weights)
+            total_loss += loss.item()
 
-    return correct / (len(test_loader) * 32)
+            _, predicted = torch.max(out, 1)
+            all_preds.append(predicted.cpu())
+            all_labels.append(data.y.cpu())
+
+            total += data.y.size(0)
+            correct += (predicted == data.y).sum().item()
+
+    avg_loss = total_loss / len(test_loader)
+    accuracy = correct / total
+    return avg_loss, accuracy
+
+
+def normalize_data(train_dataset, test_dataset):
+    all_edge_attr = torch.cat([data.edge_attr for data in train_dataset + test_dataset], dim=0)
+
+    scaler = StandardScaler()
+    scaler.fit(all_edge_attr.numpy())  # Fit scaler on all edge attributes
+
+    for data in train_dataset:
+        data.edge_attr = torch.tensor(scaler.transform(data.edge_attr.numpy()), dtype=torch.float)
+    for data in test_dataset:
+        data.edge_attr = torch.tensor(scaler.transform(data.edge_attr.numpy()), dtype=torch.float)
+
+
+def compute_class_weights(dataset):
+    from sklearn.utils.class_weight import compute_class_weight
+    labels = torch.cat([data.y for data in dataset], dim=0).numpy()
+
+    class_weights = compute_class_weight('balanced', classes=np.unique(labels), y=labels)
+    class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
+    print("Class Weights:", class_weights_tensor)
+    return class_weights_tensor
 
 
 if __name__ == '__main__':
+
     train_dataset = None
     test_dataset = None
 
-    if len(sys.argv) == 2:
-        train_dataset, test_dataset, label_map = load_dataset(sys.argv[1], store=True)
-        print('Labels:', len(label_map))
-        num_classes = len(label_map)
-    elif len(sys.argv) == 3:
-        train_dataset = torch.load(sys.argv[1])
-        test_dataset = torch.load(sys.argv[2])
-        print('Labels:', 2)
-        num_classes = 2
-    else:
-        print("Usage: python prepare_dataset.py <dataset_path>")
-        sys.exit(1)
+    args = parse_args()
+
+    #if len(sys.argv) == 2:
+    #    train_dataset, test_dataset, labels = load_dataset_csv(sys.argv[1], store=True)
+    #    print('Labels:', len(labels))
+    #    num_classes = len(labels)
+    #elif len(sys.argv) == 3:
+    #    train_dataset = torch.load(sys.argv[1])
+    #    test_dataset = torch.load(sys.argv[2])
+    #    print('Labels:', 2)
+    #    num_classes = 2
+    #else:
+    #    print("Usage: python prepare_dataset.py <dataset_path>")
+    #    sys.exit(1)
+
+    train_dataset, test_dataset, labels = load_dataset_csv(args.dataset_path, store=True)
+    print('Labels:', len(labels))
+    num_classes = len(labels)
+    OUTPUT_DIM = num_classes
 
     # for data in train_dataset:
     #     edge_attr = data.edge_attr
@@ -177,31 +257,22 @@ if __name__ == '__main__':
     #     std = edge_attr.std(dim=0, keepdim=True) + 1e-8  # Avoid division by zero
     #     data.edge_attr = (edge_attr - mean) / std
 
-    from sklearn.preprocessing import StandardScaler
 
     # Collect all edge attributes across your dataset
-    all_edge_attr = torch.cat([data.edge_attr for data in train_dataset + test_dataset], dim=0)
+    normalize_data(train_dataset, test_dataset)
 
-    # Min-Max normalization using sklearn
-    scaler = StandardScaler()
-    scaler.fit(all_edge_attr.numpy())  # Fit scaler on all edge attributes
-
-    for data in train_dataset:
-        data.edge_attr = torch.tensor(scaler.transform(data.edge_attr.numpy()), dtype=torch.float)
-    for data in test_dataset:
-        data.edge_attr = torch.tensor(scaler.transform(data.edge_attr.numpy()), dtype=torch.float)
-
+    class_weights = compute_class_weights(train_dataset + test_dataset)
 
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
     print('=== Pytorch DataLoader ===')
-    print(len(train_loader) * train_loader.batch_size)
-    print(len(test_loader) * train_loader.batch_size)
+    print('Train size: ', len(train_loader) * train_loader.batch_size)
+    print('Test size: ', len(test_loader) * train_loader.batch_size)
 
     device = torch_geometric.device('cpu')
-    #device = torch_geometric.device('auto')
     print(train_dataset[0].edge_attr.size(1))
+
     model = GraphClassifier(
         edge_dim=train_dataset[0].edge_attr.size(1),
         hidden_dim=100,
@@ -214,7 +285,6 @@ if __name__ == '__main__':
     #     dict(params=model.conv2.parameters(), weight_decay=0)
     # ], lr=learning_rate)  # Only perform weight-decay on first convolution.
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
     epochs = 200
 
     init_wandb(
@@ -225,16 +295,18 @@ if __name__ == '__main__':
         device=device,
     )
 
-    best_val_acc = test_acc = 0
+    best_acc = 0
     times = []
     for epoch in range(1, epochs + 1):
         start = time.time()
-        loss = train(model, train_loader, optimizer)
-        val_acc = test(model, test_loader)
-        # if val_acc > best_val_acc:
-        #     best_val_acc = val_acc
-        #     test_acc = tmp_test_acc
-        log(Epoch=epoch, Loss=loss, Val=val_acc)
+        train_loss = train(model, train_loader, optimizer, class_weights)
+        test_loss, acc = test(model, test_loader, class_weights)
+
+        if acc > best_acc:
+            best_acc = acc
+
+        log(Epoch=epoch, Loss=train_loss, Val=test_loss, Acc=acc)
         times.append(time.time() - start)
 
+    log(Best_Acc=best_acc)
     print(f'Median time per epoch: {torch.tensor(times).median():.4f}s')
