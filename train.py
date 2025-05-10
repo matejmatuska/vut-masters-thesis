@@ -15,12 +15,12 @@ from model.chrono import ChronoClassifier
 from model.repr1 import Repr1Classifier
 
 
-def train(model, train_loader, optimizer, criterion, device):
+def train(model, loader, optimizer, criterion, device):
     model.train()
 
     total_loss = 0
 
-    for data in train_loader:
+    for data in loader:
         optimizer.zero_grad()
         data = data.to(device)
         out = model(data)
@@ -29,10 +29,10 @@ def train(model, train_loader, optimizer, criterion, device):
         optimizer.step()
         total_loss += loss.item()
 
-    return total_loss / len(train_loader)
+    return total_loss / len(loader)
 
 
-def validate(model, loader, criterion, device, log=False, f1_average='weighted'):
+def evaluate(which, model, loader, criterion, device, log=False, f1_average='macro'):
     model.eval()
     all_preds = []
     all_labels = []
@@ -60,11 +60,13 @@ def validate(model, loader, criterion, device, log=False, f1_average='weighted')
 
     if log:
         conf_matrix = confusion_matrix(all_labels, all_preds)
-        utils.log_conf_matrix(conf_matrix)
+        utils.log_conf_matrix(conf_matrix, f"confusion_matrix_{which}.png")
 
         print("\nClassification Report:")
         print(classification_report(all_labels, all_preds, digits=4))
 
+        report_dict = classification_report(all_labels, all_preds, output_dict=True)
+        mlflow.log_dict(report_dict, artifact_file=f"classification_report_{which}.json")
 
     f1 = f1_score(all_labels, all_preds, average=f1_average)
     avg_loss = total_loss / len(loader)
@@ -188,21 +190,18 @@ if __name__ == '__main__':
 
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=False)
     val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=True)
+    test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True)
 
-    model_factory = get_model_factory(args.model)
-    model = model_factory(
+    model = get_model_factory(args.model)(
         train_set,
         hidden_dim=args.hidden,
         dropout=args.dropout,
         nlayers=args.layers,
     ).to(device)
 
-    # optimizer = torch.optim.Adam([
-    #     dict(params=model.conv1.parameters(), weight_decay=5e-4),
-    #     dict(params=model.conv2.parameters(), weight_decay=0)
-    # ], lr=learning_rate)  # Only perform weight-decay on first convolution.
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate,
-                                 weight_decay=args.weight_decay)
+    optimizer = torch.optim.Adam(
+        model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+    )
     criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
     early_stopping = utils.EarlyStopping(patience=args.patience, tolerance=args.tolerance)
 
@@ -217,9 +216,9 @@ if __name__ == '__main__':
             start = time.time()
 
             train_loss = train(model, train_loader, optimizer, criterion, device)
-            val_loss, val_acc, val_f1 = validate(model, val_loader, criterion, device, epoch == args.epochs)
-            if val_acc > best_acc:
-                best_acc = val_acc
+            val_loss, val_acc, val_f1 = evaluate(
+                "val", model, val_loader, criterion, device, epoch == args.epochs
+            )
 
             mlflow.log_metrics({
                 "train_loss": train_loss,
@@ -236,4 +235,15 @@ if __name__ == '__main__':
                 break
 
         mlflow.log_metric('median_epoch_time', torch.tensor(times).median())
-        print(f'Median time per epoch: {torch.tensor(times).median():.4f}s')
+
+        # Evaluate on the test set
+        model.load_state_dict(early_stopping.best_model_state)
+        test_loss, test_acc, test_f1 = evaluate(
+            "test", model, test_loader, criterion, device, True
+        )
+        mlflow.log_metrics({
+            "test_loss": test_loss,
+            "test_accuracy": test_acc,
+            "test_f1": test_f1,
+        }, step=epoch)
+        print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_acc:.4f}, Test F1: {test_f1:.4f}")
