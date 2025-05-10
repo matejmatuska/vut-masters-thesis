@@ -6,7 +6,7 @@ import mlflow
 import numpy as np
 import seaborn as sns
 import torch
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, f1_score
 from sklearn.utils.class_weight import compute_class_weight
 from torch_geometric.loader import DataLoader
 from torch_geometric.logging import log
@@ -35,7 +35,7 @@ def train(model, train_loader, optimizer, criterion, device):
     return total_loss / len(train_loader)
 
 
-def validate(model, test_loader, criterion, device, last_epoch=False):
+def validate(model, loader, criterion, device, log=False, f1_average='weighted'):
     model.eval()
     all_preds = []
     all_labels = []
@@ -45,7 +45,7 @@ def validate(model, test_loader, criterion, device, last_epoch=False):
     total = 0
 
     with torch.no_grad():
-        for data in test_loader:
+        for data in loader:
             data = data.to(device)
             out = model(data)
             loss = criterion(out, data.y)
@@ -58,19 +58,21 @@ def validate(model, test_loader, criterion, device, last_epoch=False):
             total += data.y.size(0)
             correct += (predicted == data.y).sum().item()
 
-    if last_epoch:
-        all_labels = torch.cat(all_labels)
-        all_preds = torch.cat(all_preds)
+    all_preds = torch.cat(all_preds).numpy()
+    all_labels = torch.cat(all_labels).numpy()
 
+    if log:
         conf_matrix = confusion_matrix(all_labels, all_preds)
         log_conf_matrix(conf_matrix, epoch)
 
         print("\nClassification Report:")
         print(classification_report(all_labels, all_preds, digits=4))
 
-    avg_loss = total_loss / len(test_loader)
+
+    f1 = f1_score(all_labels, all_preds, average=f1_average)
+    avg_loss = total_loss / len(loader)
     accuracy = correct / total
-    return avg_loss, accuracy
+    return avg_loss, accuracy, f1
 
 
 def compute_class_weights(dataset):
@@ -231,17 +233,18 @@ if __name__ == '__main__':
             start = time.time()
 
             train_loss = train(model, train_loader, optimizer, criterion, device)
+            val_loss, val_acc, val_f1 = validate(model, val_loader, criterion, device, epoch == args.epochs)
+            if val_acc > best_acc:
+                best_acc = val_acc
 
-            test_loss, acc = validate(model, val_loader, criterion, device, epoch == args.epochs)
+            mlflow.log_metrics({
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+                "val_accuracy": val_acc,
+                "val_f1": val_f1,
+            }, step=epoch)
 
-            if acc > best_acc:
-                best_acc = acc
-
-            mlflow.log_metric('train_loss', train_loss, step=epoch)
-            mlflow.log_metric('test_loss', test_loss, step=epoch)
-            mlflow.log_metric('accuracy', acc, step=epoch)
-
-            log(Epoch=epoch, Loss=train_loss, Val=test_loss, Acc=acc)
+            log(Epoch=epoch, Loss=train_loss, Val=val_loss, Acc=val_acc)
             times.append(time.time() - start)
 
         log(Best_Acc=best_acc)
