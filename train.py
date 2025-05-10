@@ -1,17 +1,14 @@
 import argparse
 import time
 
-import matplotlib.pyplot as plt
 import mlflow
-import numpy as np
-import seaborn as sns
 import torch
 from sklearn.metrics import classification_report, confusion_matrix, f1_score
-from sklearn.utils.class_weight import compute_class_weight
 from torch_geometric.loader import DataLoader
 from torch_geometric.logging import log
 from torch_geometric.transforms import NormalizeFeatures
 
+import utils
 from dataset import ChronoDataset, Repr1Dataset, SunDataset
 from model.baseline import GraphClassifier
 from model.chrono import ChronoClassifier
@@ -63,7 +60,7 @@ def validate(model, loader, criterion, device, log=False, f1_average='weighted')
 
     if log:
         conf_matrix = confusion_matrix(all_labels, all_preds)
-        log_conf_matrix(conf_matrix, epoch)
+        utils.log_conf_matrix(conf_matrix)
 
         print("\nClassification Report:")
         print(classification_report(all_labels, all_preds, digits=4))
@@ -73,26 +70,6 @@ def validate(model, loader, criterion, device, log=False, f1_average='weighted')
     avg_loss = total_loss / len(loader)
     accuracy = correct / total
     return avg_loss, accuracy, f1
-
-
-def compute_class_weights(dataset):
-    labels = torch.cat([data.y for data in dataset], dim=0).numpy()
-
-    class_weights = compute_class_weight('balanced', classes=np.unique(labels), y=labels)
-    class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
-    return class_weights_tensor
-
-
-def log_conf_matrix(cm, path="confusion_matrix.png"):
-    plt.figure(figsize=(8, 6))
-    ticks = np.arange(0, cm.shape[0])
-    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=ticks, yticklabels=ticks)
-    plt.title(f"Confusion Matrix")
-    plt.xlabel("Predicted")
-    plt.ylabel("True")
-
-    mlflow.log_figure(plt.gcf(), path)
-    plt.close()
 
 
 def parse_args():
@@ -110,6 +87,13 @@ def parse_args():
     parser.add_argument("--layers", type=int, default=2, help="Number of layers in the model")
     parser.add_argument("--hidden", type=int, default=64, help="Hidden dimension size")
     parser.add_argument("--device", type=str, default="cpu", choices=["cuda", "cpu"], help="Device to run training on")
+
+    parser.add_argument("--patience", type=int, default=20, help="Early stopping patience")
+    parser.add_argument("--tolerance", type=float, default=5e-3, help="Early stopping tolerance")
+
+    parser.add_argument("--mlflow-uri", type=str, default="http://localhost:5000", help="MLflow tracking URI")
+    parser.add_argument("--mlflow-experiment", type=str, default="xmatus36-gnns", help="MLflow experiment name")
+    parser.add_argument("--mlflow-run", type=str, help="MLflow run name")
     return parser.parse_args()
 
 
@@ -197,7 +181,7 @@ if __name__ == '__main__':
     num_classes = train_set.num_classes
     device = torch.device(args.device)
 
-    class_weights = compute_class_weights(train_set).to(device)
+    class_weights = utils.compute_class_weights(train_set).to(device)
 
     print(f'Number of classes: {num_classes}')
     print("Class Weights:", class_weights)
@@ -220,6 +204,7 @@ if __name__ == '__main__':
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate,
                                  weight_decay=args.weight_decay)
     criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+    early_stopping = utils.EarlyStopping(patience=args.patience, tolerance=args.tolerance)
 
     mlflow.set_tracking_uri(uri="http://localhost:5000")
     mlflow.set_experiment("xmatus36-gnns")
@@ -227,7 +212,6 @@ if __name__ == '__main__':
         mlflow.log_param('num_classes', num_classes)
         mlflow.log_params(vars(args))
 
-        best_acc = 0
         times = []
         for epoch in range(1, args.epochs + 1):
             start = time.time()
@@ -244,10 +228,12 @@ if __name__ == '__main__':
                 "val_f1": val_f1,
             }, step=epoch)
 
-            log(Epoch=epoch, Loss=train_loss, Val=val_loss, Acc=val_acc)
+            log(Epoch=epoch, Loss=train_loss, Val=val_loss, Acc=val_acc, F1=val_f1)
             times.append(time.time() - start)
 
-        log(Best_Acc=best_acc)
-        mlflow.log_metric('best_acc', best_acc)
+            if early_stopping(val_loss, model, val_f1=val_f1):
+                print(f"Early stopping at epoch {epoch} with min val_loss: {early_stopping.best_loss:.4f}")
+                break
+
         mlflow.log_metric('median_epoch_time', torch.tensor(times).median())
         print(f'Median time per epoch: {torch.tensor(times).median():.4f}s')
