@@ -205,9 +205,9 @@ if __name__ == '__main__':
     criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
     early_stopping = utils.EarlyStopping(patience=args.patience, tolerance=args.tolerance)
 
-    mlflow.set_tracking_uri(uri="http://localhost:5000")
-    mlflow.set_experiment("xmatus36-gnns")
-    with mlflow.start_run():
+    mlflow.set_tracking_uri(uri=args.mlflow_uri)
+    mlflow.set_experiment(args.mlflow_experiment)
+    with mlflow.start_run(run_name=args.mlflow_run):
         mlflow.log_param('num_classes', num_classes)
         mlflow.log_params(vars(args))
 
