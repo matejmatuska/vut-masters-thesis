@@ -1,3 +1,6 @@
+import argparse
+import os
+import sys
 import time
 
 from ast import literal_eval
@@ -171,7 +174,7 @@ def train(model, train_loader, optimizer, class_weights):
     return total_loss / len(train_loader)
 
 
-def test(model, test_loader, class_weights, last_epoch=False):
+def test(model, test_loader, class_weights):
     model.eval()
     all_preds = []
     all_labels = []
@@ -220,6 +223,25 @@ def compute_class_weights(dataset):
     return class_weights_tensor
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Training script arguments")
+    # Positional argument (unnamed) for dataset path
+    parser.add_argument("dataset_path", type=str, help="Path to the dataset")
+
+    # Common training arguments
+    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training and testing")
+    parser.add_argument("--learning_rate", "--lr", type=float, default=0.001, help="Learning rate for optimizer")
+    #parser.add_argument("--momentum", type=float, default=0.9, help="Momentum for optimizers like SGD")
+    #parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay (L2 regularization)")
+    parser.add_argument("--optimizer", type=str, default="adam", choices=["sgd", "adam", "rmsprop"], help="Optimizer to use")
+    parser.add_argument("--device", type=str, default="cpu", choices=["cuda", "cpu"], help="Device to run training on")
+    # parser.add_argument("--save_model", type=str, default=None, help="Path to save the trained model")
+    # parser.add_argument("--load_model", type=str, default=None, help="Path to load a pre-trained model")
+
+    return parser.parse_args()
+
+
 if __name__ == '__main__':
 
     train_dataset = None
@@ -263,14 +285,14 @@ if __name__ == '__main__':
 
     class_weights = compute_class_weights(train_dataset + test_dataset)
 
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
     print('=== Pytorch DataLoader ===')
     print('Train size: ', len(train_loader) * train_loader.batch_size)
     print('Test size: ', len(test_loader) * train_loader.batch_size)
 
-    device = torch_geometric.device('cpu')
+    device = torch_geometric.device(args.device)
     print(train_dataset[0].edge_attr.size(1))
 
     model = GraphClassifier(
@@ -279,25 +301,23 @@ if __name__ == '__main__':
         num_classes=num_classes,
     ).to(device)
 
-    learning_rate = 0.001
     # optimizer = torch.optim.Adam([
     #     dict(params=model.conv1.parameters(), weight_decay=5e-4),
     #     dict(params=model.conv2.parameters(), weight_decay=0)
     # ], lr=learning_rate)  # Only perform weight-decay on first convolution.
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    epochs = 200
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
     init_wandb(
-        name=f'Malware (LR={learning_rate}, Hidden={16})',
-        lr=learning_rate,
-        epochs=epochs,
+        name=f'Malware (LR={args.learning_rate}, Hidden={args.batch_size})',
+        lr=args.learning_rate,
+        epochs=args.epochs,
         hidden_channels=100,
         device=device,
     )
 
     best_acc = 0
     times = []
-    for epoch in range(1, epochs + 1):
+    for epoch in range(1, args.epochs + 1):
         start = time.time()
         train_loss = train(model, train_loader, optimizer, class_weights)
         test_loss, acc = test(model, test_loader, class_weights)
