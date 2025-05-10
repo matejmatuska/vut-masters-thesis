@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import networkx as nx
 import pandas as pd
+import seaborn as sns
 
 import torch
 import torch.nn.functional as F
@@ -21,6 +22,7 @@ from torch_geometric.logging import init_wandb, log
 from torch_geometric.utils import from_networkx
 
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import classification_report, confusion_matrix
 
 from model import GraphClassifier
 
@@ -174,7 +176,7 @@ def train(model, train_loader, optimizer, class_weights):
     return total_loss / len(train_loader)
 
 
-def test(model, test_loader, class_weights):
+def test(model, test_loader, class_weights, last_epoch=False):
     model.eval()
     all_preds = []
     all_labels = []
@@ -195,6 +197,18 @@ def test(model, test_loader, class_weights):
 
             total += data.y.size(0)
             correct += (predicted == data.y).sum().item()
+
+    if last_epoch:
+        all_preds = torch.cat(all_preds)
+        all_labels = torch.cat(all_labels)
+        all_preds = all_preds.numpy()
+        all_labels = all_labels.numpy()
+
+        conf_matrix = confusion_matrix(all_labels, all_preds)
+        plot_confusion_matrix(conf_matrix, epoch)
+
+        print("\nClassification Report:")
+        print(classification_report(all_labels, all_preds, digits=4))
 
     avg_loss = total_loss / len(test_loader)
     accuracy = correct / total
@@ -221,6 +235,21 @@ def compute_class_weights(dataset):
     class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
     print("Class Weights:", class_weights_tensor)
     return class_weights_tensor
+
+
+def plot_confusion_matrix(cm, epoch, path):
+    plt.figure(figsize=(8, 6))
+    ticks = np.arange(0, cm.shape[0])
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=ticks, yticklabels=ticks)
+    plt.title(f"Confusion Matrix (Epoch {epoch})")
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+
+    if path is not None:
+        plt.savefig(path)
+    else:
+        plt.show()
+    plt.close()
 
 
 def parse_args():
@@ -320,7 +349,7 @@ if __name__ == '__main__':
     for epoch in range(1, args.epochs + 1):
         start = time.time()
         train_loss = train(model, train_loader, optimizer, class_weights)
-        test_loss, acc = test(model, test_loader, class_weights)
+        test_loss, acc = test(model, test_loader, class_weights, epoch == args.epochs)
 
         if acc > best_acc:
             best_acc = acc
