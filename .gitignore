@@ -4,4 +4,9 @@ __pycache__/
 *.log
 mlruns/
 
+*.csv
+
+*.pdf
+*.tex
+
 *.vim
