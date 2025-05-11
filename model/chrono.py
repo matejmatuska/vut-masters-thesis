@@ -4,23 +4,24 @@ from torch_geometric.nn import GCNConv, global_mean_pool, global_max_pool
 
 
 class ChronoClassifier(torch.nn.Module):
-    def __init__(self, input_dim, hidden_dim, num_classes, layers, dropout=0.0):
+    def __init__(self, input_dim, hidden_dim, num_classes, layers=3, dropout=0.05):
         super().__init__()
-        self.convs = torch.nn.ModuleList()
         self.dropout = dropout
 
+        self.convs = torch.nn.ModuleList()
         self.convs.append(GCNConv(input_dim, hidden_dim))
-        self.convs.append(GCNConv(hidden_dim, hidden_dim // 2))
-        # self.convs.append(GCNConv(hidden_dim // 2, hidden_dim // 4))
-        self.convs.append(GCNConv(hidden_dim // 2, hidden_dim // 4))
+        for _ in range(layers - 2):
+            self.convs.append(GCNConv(hidden_dim, hidden_dim))
+        self.convs.append(GCNConv(hidden_dim, hidden_dim))
 
         self.fc = torch.nn.Sequential(
-            torch.nn.Linear(hidden_dim // 4, hidden_dim),
-            torch.nn.ReLU(),
             torch.nn.Linear(hidden_dim, hidden_dim // 2),
             torch.nn.ReLU(),
-            #torch.nn.Dropout(self.dropout),
-            torch.nn.Linear(hidden_dim // 2, num_classes),
+            torch.nn.Dropout(self.dropout),
+            torch.nn.Linear(hidden_dim // 2, hidden_dim // 4),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(self.dropout),
+            torch.nn.Linear(hidden_dim // 4, num_classes),
         )
 
 
