@@ -1,5 +1,6 @@
 __pycache__/
 *.pt
+*.pth
 
 *.log
 mlruns/
@@ -10,3 +11,6 @@ mlruns/
 *.tex
 
 *.vim
+*.csv
+
+*.pdf

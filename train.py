@@ -60,13 +60,13 @@ def evaluate(which, model, loader, criterion, device, log=False, f1_average='mac
 
     if log:
         conf_matrix = confusion_matrix(all_labels, all_preds)
-        utils.log_conf_matrix(conf_matrix, f"confusion_matrix_{which}.png")
+        utils.log_conf_matrix(conf_matrix)
 
         print("\nClassification Report:")
         print(classification_report(all_labels, all_preds, digits=4))
 
         report_dict = classification_report(all_labels, all_preds, output_dict=True)
-        mlflow.log_dict(report_dict, artifact_file=f"classification_report_{which}.json")
+        mlflow.log_dict(report_dict, artifact_file="classification_report.json")
 
     f1 = f1_score(all_labels, all_preds, average=f1_average)
     avg_loss = total_loss / len(loader)
@@ -91,7 +91,7 @@ def parse_args():
     parser.add_argument("--device", type=str, default="cpu", choices=["cuda", "cpu"], help="Device to run training on")
 
     parser.add_argument("--patience", type=int, default=20, help="Early stopping patience")
-    parser.add_argument("--tolerance", type=float, default=5e-3, help="Early stopping tolerance")
+    parser.add_argument("--tolerance", type=int, default=5e-3, help="Early stopping tolerance")    
 
     parser.add_argument("--mlflow-uri", type=str, default="http://localhost:5000", help="MLflow tracking URI")
     parser.add_argument("--mlflow-experiment", type=str, default="xmatus36-gnns", help="MLflow experiment name")
@@ -216,9 +216,7 @@ if __name__ == '__main__':
             start = time.time()
 
             train_loss = train(model, train_loader, optimizer, criterion, device)
-            val_loss, val_acc, val_f1 = evaluate(
-                "val", model, val_loader, criterion, device, epoch == args.epochs
-            )
+            val_loss, val_acc, val_f1 = evaluate(model, val_loader, criterion, device, epoch == args.epochs)
 
             mlflow.log_metrics({
                 "train_loss": train_loss,
@@ -238,9 +236,7 @@ if __name__ == '__main__':
 
         # Evaluate on the test set
         model.load_state_dict(early_stopping.best_model_state)
-        test_loss, test_acc, test_f1 = evaluate(
-            "test", model, test_loader, criterion, device, True
-        )
+        test_loss, test_acc, test_f1 = evaluate(model, test_loader, criterion, device, True)
         mlflow.log_metrics({
             "test_loss": test_loss,
             "test_accuracy": test_acc,

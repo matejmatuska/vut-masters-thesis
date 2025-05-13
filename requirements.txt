@@ -8,6 +8,7 @@ matplotlib
 torch
 torch_geometric
 scikit-learn
+optuna
 
 networkx
 
