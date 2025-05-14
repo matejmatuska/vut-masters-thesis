@@ -79,8 +79,3 @@ RUN git clone --recurse-submodules https://github.com/CESNET/ipfixprobe \
 	&& ./configure --with-nemea --with-pcap\
 	&& make -j$(nproc) \
 	&& make install
-
-
-# COPY run.py /root/
-
-# CMD python3 /root/run.py
