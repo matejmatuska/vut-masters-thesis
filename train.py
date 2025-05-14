@@ -12,7 +12,7 @@ import utils
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Training script arguments")
+    parser = argparse.ArgumentParser(description="Run a single training and evaluation run")
 
     parser.add_argument("dataset_path", type=str, help="Path to the dataset")
     parser.add_argument("model", type=str, choices=["baseline", "chrono", "repr1"], help="Model to train")
