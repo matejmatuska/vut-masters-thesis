@@ -10,11 +10,11 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.logging import log
 from torch_geometric.transforms import NormalizeFeatures
 
+import utils
 from dataset import ChronoDataset, Repr1Dataset, SunDataset
 from model.baseline import GraphClassifier
 from model.chrono import ChronoClassifier
 from model.repr1 import Repr1Classifier
-import utils
 
 
 def train(model, loader, optimizer, criterion, device):
@@ -246,7 +246,7 @@ def objective(trial: optuna.Trial) -> float:
                 'val_f1': val_f1
             }, step=epoch)
 
-            trial.report(val_f1, epoch)
+            trial.report(val_f1, step=epoch - 1)  # pruner assumes start at 0
 
             if trial.should_prune():
                 print(f"Trial pruned at epoch {epoch} with val_f1: {val_f1}")
@@ -272,7 +272,10 @@ def objective(trial: optuna.Trial) -> float:
 mlflow.set_tracking_uri(uri=args.mlflow_uri)
 mlflow.set_experiment(args.mlflow_experiment)
 
-study = optuna.create_study(direction="maximize")
+pruner = optuna.pruners.MedianPruner(
+    n_warmup_steps=20, n_startup_trials=10, n_min_trials=5, interval_steps=5
+)
+study = optuna.create_study(direction="maximize", pruner=pruner)
 with mlflow.start_run(run_name=args.mlflow_run):
     study.optimize(objective, n_trials=args.trials)
 
