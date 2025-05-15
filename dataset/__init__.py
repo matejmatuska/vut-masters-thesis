@@ -9,7 +9,7 @@ import torch
 from torch_geometric.data import Data, HeteroData, InMemoryDataset
 from torch_geometric.utils import from_networkx
 
-_DEFAULT_ATTRIBUTES = [
+DEFAULT_ATTRIBUTES = [
     "PACKETS",
     "PACKETS_REV",
     "BYTES",
@@ -19,6 +19,14 @@ _DEFAULT_ATTRIBUTES = [
     "PROTOCOL",
     "SRC_PORT",
     "DST_PORT",
+    # "DURATION",
+    # "TIME_FIRST",
+    # "TIME_LAST",
+]
+PPI_ATTRIBUTES = [
+    "PPI_PKT_LENGTHS",
+    "PPI_PKT_TIMES",
+    "PPI_PKT_DIRECTIONS",
 ]
 
 
@@ -57,6 +65,12 @@ def load_dataset_csv(path) -> pd.DataFrame:
 
 
 class BaseGraphDataset(InMemoryDataset, ABC):
+    """
+    Base class for creating graph datasets.
+
+    This class is designed to be subclassed for specific graph representations.
+    The subclass should implement the `sample_to_graph` method to convert a sample DataFrame into a graph.
+    """
 
     def __init__(
         self, root, split, transform=None, pre_transform=None, pre_filter=None
@@ -89,8 +103,13 @@ class BaseGraphDataset(InMemoryDataset, ABC):
         """
         Convert a sample DataFrame to a graph.
 
-        A sample is a DataFrame of flows with the same family and sample name,
-        aggregated from a PCAP file of a single malware sample execution.
+        Subclasses should implement this method to convert a DataFrame representing a single
+        sample into a graph representation.
+        None can be returned if the DataFrame doesn't contain enough data to create a graph.
+
+        Note that a label also needs to be set on the graph, the following can be used:
+            label = df["label_encoded"].iloc[0]
+            built_graph.y = torch.tensor([label], dtype=torch.long)
 
         :param df: A DataFrame representing a single sample.
         :return: A PyTorch Geometric Data or HetetoData object representing the graph.
@@ -128,7 +147,6 @@ class BaseGraphDataset(InMemoryDataset, ABC):
 
 
 class SunDataset(BaseGraphDataset):
-
     def __init__(
         self, root, split, transform=None, pre_transform=None, pre_filter=None
     ):
@@ -140,17 +158,10 @@ class SunDataset(BaseGraphDataset):
         """
         super().__init__(root, split, transform, pre_transform, pre_filter)
 
-    def _sample_to_graph(
-        self,
-        df,
-        attributes=_DEFAULT_ATTRIBUTES,
-        aggfunc=np.mean,
-    ):
+    def _sample_to_graph(self, df, aggfunc=np.mean):
         """
         Convert a row of dataset DataFrame to a digraph.
 
-        :param attributes: A list of attributes to use as edge attributes.
-        :type attributes: list
         :param aggfunc: A function to aggregate edge attributes.
         :type aggfunc: function
         """
@@ -159,10 +170,9 @@ class SunDataset(BaseGraphDataset):
             src_ip = row["SRC_IP"]
             dst_ip = row["DST_IP"]
 
-            edge_attr = row[attributes].to_list()
-            edge_attr.extend(row["PPI_PKT_LENGTHS"])
-            edge_attr.extend(row["PPI_PKT_TIMES"])
-            edge_attr.extend(row["PPI_PKT_DIRECTIONS"])
+            edge_attr = row[DEFAULT_ATTRIBUTES].to_list()
+            for attr in PPI_ATTRIBUTES:
+                edge_attr.extend(row[attr])
             G.add_edge(src_ip, dst_ip, feature=edge_attr)
 
         def aggregate_edges(graph, aggfunc=aggfunc) -> nx.DiGraph:
@@ -195,8 +205,7 @@ class SunDataset(BaseGraphDataset):
 
         data = from_networkx(graph)
         data.edge_attr = torch.tensor(
-            [e["feature"] for _, _, e in graph.edges(data=True)],
-            dtype=torch.float
+            [e["feature"] for _, _, e in graph.edges(data=True)], dtype=torch.float
         )
         # data.edge_attr = torch.tensor(
         #     [list(graph.edges[edge].values()) for edge in graph.edges],
@@ -207,7 +216,6 @@ class SunDataset(BaseGraphDataset):
 
 
 class ChronoDataset(BaseGraphDataset):
-
     def __init__(
         self, root, split, transform=None, pre_transform=None, pre_filter=None
     ):
@@ -219,12 +227,7 @@ class ChronoDataset(BaseGraphDataset):
         """
         super().__init__(root, split, transform, pre_transform, pre_filter)
 
-
-    def _sample_to_graph(
-        self,
-        df,
-        attributes=_DEFAULT_ATTRIBUTES,
-    ):
+    def _sample_to_graph(self, df):
         """
         Convert a row of dataset DataFrame to a digraph.
         """
@@ -241,15 +244,13 @@ class ChronoDataset(BaseGraphDataset):
             prev_node = node_key(prev)
             curr_node = node_key(curr)
 
-            prev_attrs = prev[attributes].to_dict()
-            prev_attrs["PPI_PKT_LENGTHS"] = prev["PPI_PKT_LENGTHS"]
-            prev_attrs["PPI_PKT_DIRECTIONS"] = prev["PPI_PKT_DIRECTIONS"]
-            prev_attrs["PPI_PKT_TIMES"] = prev["PPI_PKT_TIMES"]
+            prev_attrs = prev[DEFAULT_ATTRIBUTES].to_dict()
+            for attr in PPI_ATTRIBUTES:
+                prev_attrs[attr] = prev[attr]
 
-            curr_attrs = curr[attributes].to_dict()
-            curr_attrs["PPI_PKT_LENGTHS"] = curr["PPI_PKT_LENGTHS"]
-            curr_attrs["PPI_PKT_DIRECTIONS"] = curr["PPI_PKT_DIRECTIONS"]
-            curr_attrs["PPI_PKT_TIMES"] = curr["PPI_PKT_TIMES"]
+            curr_attrs = curr[DEFAULT_ATTRIBUTES].to_dict()
+            for attr in PPI_ATTRIBUTES:
+                curr_attrs[attr] = curr[attr]
 
             G.add_node(prev_node, **prev_attrs)
             G.add_node(curr_node, **curr_attrs)
@@ -263,6 +264,8 @@ class ChronoDataset(BaseGraphDataset):
             prev_node = node_key(prev)
             curr_node = node_key(curr)
 
+            # .name is the index of the row
+            # FIXME rename the index to something more meaningful
             if curr.name - prev.name > 1:
                 G.add_edge(node_key(curr), node_key(prev))
 
@@ -288,7 +291,6 @@ class ChronoDataset(BaseGraphDataset):
 
 
 class Repr1Dataset(BaseGraphDataset):
-
     def __init__(
         self, root, split, transform=None, pre_transform=None, pre_filter=None
     ):
@@ -300,11 +302,7 @@ class Repr1Dataset(BaseGraphDataset):
         """
         super().__init__(root, split, transform, pre_transform, pre_filter)
 
-    def _sample_to_graph(
-        self,
-        df,
-        attributes=_DEFAULT_ATTRIBUTES,
-    ):
+    def _sample_to_graph(self, df):
         """
         Convert a row of dataset DataFrame to HeteroData.
         """
@@ -326,11 +324,10 @@ class Repr1Dataset(BaseGraphDataset):
             src_id = host_ip_to_id[row["SRC_IP"]]
             dst_id = host_ip_to_id[row["DST_IP"]]
 
-            attrs = row[attributes].to_dict()
+            attrs = row[DEFAULT_ATTRIBUTES].to_dict()
             attr_vals = list(attrs.values())
-            attr_vals.extend(row["PPI_PKT_LENGTHS"])
-            attr_vals.extend(row["PPI_PKT_DIRECTIONS"])
-            attr_vals.extend(row["PPI_PKT_TIMES"])
+            for attr in PPI_ATTRIBUTES:
+                attr_vals.extend(row[attr])
             flow_attrs.append(attr_vals)
 
             edges_host_to_flow[0] += [src_id, dst_id]
