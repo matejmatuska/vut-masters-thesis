@@ -1,32 +1,45 @@
+"""
+Stitch DNS uniflow records together into biflow records.
+"""
+import functools
 import itertools
 import sys
-from ast import literal_eval
 
 import pandas as pd
 
-_STITCH_COLS = ["family", "sample", "DNS_ID", "DNS_NAME"]
-_TUPLE_COLS = [
+STITCH_COLS = ["family", "sample", "DNS_ID", "DNS_NAME"]
+"""
+The columns to group by when stitching DNS records together.
+Used together with FLOW_TUPLE_COLS to create a unique key for each flow.
+"""
+
+FLOW_TUPLE_COLS = [
     "SRC_IP",
     "SRC_PORT",
     "DST_IP",
     "DST_PORT",
     "PROTOCOL",
 ]
+"""
+Flow tuple columns to group by when stitching DNS records together.
+Used together with STITCH_COLS to create a unique key for each flow.
+"""
 
-def concat_lists(lists):
+def _concat_lists(lists):
     return list(itertools.chain(*lists))
 
-_agg_funcs = {
+COL_AGG_FUNCS = {
     "BYTES": "sum",
     "BYTES_REV": "sum",
     "PACKETS": "sum",
     "PACKETS_REV": "sum",
     "TIME_FIRST": "min",
     "TIME_LAST": "max",
-    # "PROTOCOL": "first",
-    "PPI_PKT_LENGTHS": concat_lists,
-    "PPI_PKT_DIRECTIONS": concat_lists,
-    "PPI_PKT_TIMES": concat_lists,
+    "TCP_FLAGS": lambda x: functools.reduce(lambda a, b: a | b, x.astype(int)),
+    "TCP_FLAGS_REV": lambda x: functools.reduce(lambda a, b: a | b, x.astype(int)),
+    "PPI_PKT_LENGTHS": _concat_lists,
+    "PPI_PKT_DIRECTIONS": _concat_lists,
+    "PPI_PKT_TIMES": _concat_lists,
 }
 
 
@@ -45,6 +58,8 @@ def stitch_dns(df):
         "BYTES_REV",
         "PACKETS",
         "PACKETS_REV",
+        "TCP_FLAGS",
+        "TCP_FLAGS_REV",
     ]
     reverse_cols = [
         "DST_IP",
@@ -55,8 +70,10 @@ def stitch_dns(df):
         "BYTES",
         "PACKETS_REV",
         "PACKETS",
+        "TCP_FLAGS_REV",
+        "TCP_FLAGS",
     ]
-    groupcols = _STITCH_COLS + _TUPLE_COLS
+    groupcols = STITCH_COLS + FLOW_TUPLE_COLS
 
     def flip_reversed_flows(group):
         # NOTE: hopefully there is no weird case where the first packet is not sent by the host
@@ -76,42 +93,42 @@ def stitch_dns(df):
 
 
     # first aggregate the flows in the same direction
-    print("Uniflow Aggregated:")
-    df = df.groupby(groupcols).agg(_agg_funcs).reset_index()
-    print(df)
-    print(df.index)
-    print(df.columns)
+    # print("Uniflow Aggregated:")
+    df = df.groupby(groupcols).agg(COL_AGG_FUNCS).reset_index()
+    # print(df)
+    # print(df.index)
+    # print(df.columns)
 
-    print("Reversed columns:")
-    df = df.groupby(_STITCH_COLS, group_keys=False).apply(flip_reversed_flows)
-    print(df)
-    print(df.index)
-    print(df.columns)
+    # print("Reversed columns:")
+    df = df.groupby(STITCH_COLS, group_keys=False).apply(flip_reversed_flows)
+    # print(df)
+    # print(df.index)
+    # print(df.columns)
 
-    print('Reset index')
-    df = df.reset_index()
-    print(df.index)
-    print(df.columns)
+    # print('Reset index')
+    # df = df.reset_index()
+    # print(df.index)
+    # print(df.columns)
 
     # agg to biflow
-    print("Reversed columns and biflow merge:")
-    df = df.groupby(groupcols).agg(_agg_funcs)
-    print(df)
+    print("Reversed columns and biflows merged")
+    df = df.groupby(groupcols).agg(COL_AGG_FUNCS)
+    # print(df)
     return df
 
 
 if __name__ == "__main__":
     df = pd.read_csv(sys.argv[1])
 
-    df = parse_ppi(df)
+    # df = parse_ppi(df)
 
     # lets drop some unused columns
-    keep_cols = set(_agg_funcs.keys()) | set(_STITCH_COLS) | set(_TUPLE_COLS)
+    keep_cols = set(COL_AGG_FUNCS.keys()) | set(STITCH_COLS) | set(FLOW_TUPLE_COLS)
     df = df[list(keep_cols)]
 
     dns = df[df["DNS_NAME"].notna()]
     nondns = df[df["DNS_NAME"].isna()]
 
-    dns = stich_dns(dns)
+    dns = stitch_dns(dns)
     print("Final DNS:")
     pd.concat([nondns, dns]).to_csv("stitched.csv", index=True)
