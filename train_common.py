@@ -89,9 +89,10 @@ def get_dataset_factory(which) -> callable:
 def get_model_factory(which) -> callable:
     if which == "baseline":
 
-        def make_model(dataset, hidden_dim, dropout, nlayers=2):
+        def make_model(dataset, hidden_dim, port_dim, dropout, nlayers):
             return GraphClassifier(
                 edge_dim=dataset[0].edge_attr.size(1),
+                port_dim=port_dim,
                 hidden_dim=hidden_dim,
                 num_classes=dataset.num_classes,
                 layers=nlayers,
@@ -99,9 +100,10 @@ def get_model_factory(which) -> callable:
             )
     elif which == "chrono":
 
-        def make_model(dataset, hidden_dim, dropout, nlayers=2):
+        def make_model(dataset, hidden_dim, port_dim, dropout, nlayers):
             return ChronoClassifier(
                 input_dim=dataset[0].num_node_features,
+                port_dim=port_dim,
                 hidden_dim=hidden_dim,
                 num_classes=dataset.num_classes,
                 layers=nlayers,
@@ -109,11 +111,11 @@ def get_model_factory(which) -> callable:
             )
     elif which == "repr1":
 
-        def make_model(dataset, hidden_dim, dropout, nlayers=2):
+        def make_model(dataset, hidden_dim, port_dim, dropout, nlayers):
             return Repr1Classifier(
-                input_dim=97,
-                num_hosts=0,  # TODO unused
+                flow_dim=dataset[0]["NetworkFlow"].x.size(1),
                 hidden_dim=hidden_dim,
+                port_dim=port_dim,
                 num_classes=dataset.num_classes,
                 layers=nlayers,
                 dropout=dropout,

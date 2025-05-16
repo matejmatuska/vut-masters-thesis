@@ -16,10 +16,21 @@ SCALAR_ATTRIBUTES = [
     "BYTES_REV",
     "DURATION",
 ]
+PROTO_ONE_HOT = [
+    "PROTO_TCP",
+    "PROTO_UDP",
+    "PROTO_ICMP",
+    # "PROTO_OTHER", currently empty
+]
 VECTOR_ATTRIBUTES = [
     "PPI_PKT_LENGTHS",
     "PPI_PKT_TIMES",
     "PPI_PKT_DIRECTIONS",
+]
+EMBED_COLS = [
+    "DST_PORT",
+    "TCP_FLAGS",
+    "TCP_FLAGS_REV",
 ]
 
 
@@ -75,6 +86,9 @@ class BaseGraphDataset(InMemoryDataset, ABC):
         """
         pass
 
+    def preprocess_all(self, df):
+        return df
+
     def _load_dataset_parquet(self, path) -> pd.DataFrame:
         """
         Load a dataset from a .parquet file.
@@ -91,7 +105,10 @@ class BaseGraphDataset(InMemoryDataset, ABC):
         return df
 
     def process(self):
-        df = self._load_dataset_parquet(os.path.join(self.raw_dir, f"{self.split}.parquet"))
+        df = self._load_dataset_parquet(
+            os.path.join(self.raw_dir, f"{self.split}.parquet")
+        )
+        df = self.preprocess_all(df)
 
         data_list = []
         for sample_name, group in df.groupby("sample"):
@@ -124,44 +141,55 @@ class SunDataset(BaseGraphDataset):
         """
         super().__init__(root, split, transform, pre_transform, pre_filter)
 
-    def _sample_to_graph(self, df, aggfunc=np.mean):
+    def _sample_to_graph(self, df, aggfunc="mean"):
         """
         Convert a row of dataset DataFrame to a digraph.
 
         :param aggfunc: A function to aggregate edge attributes.
         :type aggfunc: function
         """
-        G = nx.MultiDiGraph()
+
+        def explode_to_columns(df, col):
+            """
+            Explode a column of lists into separate columns.
+            """
+            exploded = df[col].apply(pd.Series)
+            exploded.columns = [f"{col}_{i}" for i in range(exploded.shape[1])]
+            df = pd.concat([df.drop(columns=[col]), exploded], axis=1)
+            return df
+
+        # only aggregable (and IPs for grouping)
+        keep_cols = (
+            ["SRC_IP", "DST_IP"]
+            + SCALAR_ATTRIBUTES
+            + PROTO_ONE_HOT
+            + VECTOR_ATTRIBUTES
+            + EMBED_COLS
+        )
+        df = df[keep_cols]
+        # make these aggregable
+        for attr in VECTOR_ATTRIBUTES:
+            df = explode_to_columns(df, attr)
+
+        df = df.groupby(["SRC_IP", "DST_IP"], as_index=False).agg(aggfunc)
+
+        edge_attr_cols = df.columns.difference(["SRC_IP", "DST_IP"] + EMBED_COLS)
+        G = nx.DiGraph()
         for _, row in df.iterrows():
             src_ip = row["SRC_IP"]
             dst_ip = row["DST_IP"]
 
-            edge_attr = row[SCALAR_ATTRIBUTES].to_list()
-            for attr in VECTOR_ATTRIBUTES:
-                edge_attr.extend(row[attr])
-            G.add_edge(src_ip, dst_ip, feature=edge_attr)
+            edge_attr = row[edge_attr_cols].to_list()
 
-        def aggregate_edges(graph, aggfunc=aggfunc) -> nx.DiGraph:
-            """
-            Aggregate edges of a multi-digraph to a standard di-graph.
-            """
-            G = nx.DiGraph()
-            edge_data = defaultdict(lambda: defaultdict(list))
-
-            for u, v, data in graph.edges(data=True):
-                for key, val in data.items():
-                    edge_data[(u, v)][key].append(val)
-
-            for (u, v), data in edge_data.items():
-                agg_data = {}
-                for key, val_list in data.items():
-                    stacked = np.vstack(val_list)  # shape: (num_edges, feature_dim)
-                    agg_data[key] = aggfunc(stacked, axis=0)
-                G.add_edge(u, v, **agg_data)
-            return G
-
-        agg_G = aggregate_edges(G)
-        return agg_G
+            G.add_edge(
+                src_ip,
+                dst_ip,
+                features=edge_attr,
+                port=row["DST_PORT"],
+                tcp_flags=row["TCP_FLAGS"],
+                tcp_flags_rev=row["TCP_FLAGS_REV"],
+            )
+        return G
 
     @override
     def sample_to_graph(self, df):
@@ -170,12 +198,17 @@ class SunDataset(BaseGraphDataset):
 
         data = from_networkx(graph)
         data.edge_attr = torch.tensor(
-            [e["feature"] for _, _, e in graph.edges(data=True)], dtype=torch.float
+            [e["features"] for _, _, e in graph.edges(data=True)], dtype=torch.float
         )
-        # data.edge_attr = torch.tensor(
-        #     [list(graph.edges[edge].values()) for edge in graph.edges],
-        #     dtype=torch.float32,
-        # )
+        data.dst_ports = torch.tensor(
+            [e["port"] for _, _, e in graph.edges(data=True)], dtype=torch.long
+        )
+        data.tcp_flags = torch.tensor(
+            [e["tcp_flags"] for _, _, e in graph.edges(data=True)], dtype=torch.long
+        )
+        data.tcp_flags_rev = torch.tensor(
+            [e["tcp_flags_rev"] for _, _, e in graph.edges(data=True)], dtype=torch.long
+        )
         data.y = torch.tensor([label], dtype=torch.long)
         return data
 
@@ -204,10 +237,15 @@ class ChronoDataset(BaseGraphDataset):
         G = nx.DiGraph()
         # first make the forward edges
         df = df.sort_values(by="TIME_FIRST", ascending=True).reset_index(drop=True)
+
+        dst_ports = torch.tensor(df["DST_PORT"].values, dtype=torch.long)
+        tcp_flags = torch.tensor(df["TCP_FLAGS"].values, dtype=torch.long)
+        tcp_flags_rev = torch.tensor(df["TCP_FLAGS_REV"].values, dtype=torch.long)
+
         prev = df.iloc[0]
         prev_node = node_key(prev)
 
-        prev_attrs = prev[SCALAR_ATTRIBUTES].to_dict()
+        prev_attrs = prev[SCALAR_ATTRIBUTES + PROTO_ONE_HOT].to_dict()
         for attr in VECTOR_ATTRIBUTES:
             prev_attrs[attr] = prev[attr]
         G.add_node(prev_node, **prev_attrs)
@@ -240,17 +278,20 @@ class ChronoDataset(BaseGraphDataset):
             prev = curr
             prev_node = curr_node
 
+        return G, dst_ports, tcp_flags, tcp_flags_rev
+
     @override
     def sample_to_graph(self, df):
-        graph = self._sample_to_graph(df)
+        graph, dst_ports, tcp_flags, tcp_flags_rev = self._sample_to_graph(df)
         if len(graph) == 0:
             return None
 
-        label = df["label_encoded"].iloc[0]
         data = from_networkx(graph, group_node_attrs="all")
-        # data.edge_attr = torch.tensor(
-        #    [list(graph.edges[edge].values()) for edge in graph.edges], dtype=torch.float32
-        # )
+        data.dst_ports = dst_ports
+        data.tcp_flags = tcp_flags
+        data.tcp_flags_rev = tcp_flags_rev
+
+        label = df["label_encoded"].iloc[0]
         data.y = torch.tensor([label], dtype=torch.long)
         return data
 
@@ -277,6 +318,10 @@ class Repr1Dataset(BaseGraphDataset):
         edges_flow_to_host = [[], []]  # [flow_idx, host_idx]
         edges_flow_to_flow = [[], []]  # [flow_idx_src, flow_idx_dst]
 
+        dst_ports = torch.tensor(df["DST_PORT"].values, dtype=torch.long)
+        tcp_flags = torch.tensor(df["TCP_FLAGS"].values, dtype=torch.long)
+        tcp_flags_rev = torch.tensor(df["TCP_FLAGS_REV"].values, dtype=torch.long)
+
         current_host_id = 0
         current_flow_id = 0
 
@@ -289,7 +334,7 @@ class Repr1Dataset(BaseGraphDataset):
             src_id = host_ip_to_id[row["SRC_IP"]]
             dst_id = host_ip_to_id[row["DST_IP"]]
 
-            attrs = row[SCALAR_ATTRIBUTES].to_dict()
+            attrs = row[SCALAR_ATTRIBUTES + PROTO_ONE_HOT].to_dict()
             attr_vals = list(attrs.values())
             for attr in VECTOR_ATTRIBUTES:
                 attr_vals.extend(row[attr])
@@ -318,6 +363,9 @@ class Repr1Dataset(BaseGraphDataset):
         data[("NetworkFlow", "communicates", "Host")].edge_index = torch.tensor(
             edges_flow_to_host, dtype=torch.long
         )
+        data["NetworkFlow"].dst_ports = dst_ports
+        data["NetworkFlow"].tcp_flags = tcp_flags
+        data["NetworkFlow"].tcp_flags_rev = tcp_flags_rev
         return data
 
     @override

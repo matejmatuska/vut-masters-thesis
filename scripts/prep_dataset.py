@@ -6,7 +6,8 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from stitch_dns import stitch_dns
+
+import stitch_dns
 
 DATE_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
 PPI_PAD_LEN = 30
@@ -70,7 +71,7 @@ def stitch_dns_uniflows(df) -> pd.DataFrame:
     print("Stitched DNS:")
     dns = df[df["DNS_NAME"].notna()]
     nondns = df[df["DNS_NAME"].isna()]
-    dns = stitch_dns(dns).reset_index()
+    dns = stitch_dns.stitch_dns(dns).reset_index()
     return pd.concat([dns, nondns])
 
 
@@ -128,34 +129,107 @@ def normalize_all(df, per_packet_len=30) -> pd.DataFrame:
     return df
 
 
-def normalize_scale(
+def normalize_splits(
     df_train, df_val, df_test
 ) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
+    """
+    Normalize the train, validation, and test splits.
 
+    Applied normalization:
+    - log1p + std transform on PACKETS, PACKETS_REV, BYTES, BYTES_REV
+    - binning + one hot encoding on PROTOCOL
+    - log1p + std transform on PPI_PKT_LENGTHS packet wise
+    - log1p + std transform on PPI_PKT_TIMES packet wise
+    Other columns are not normalized.
+
+    Scalers are fit on the train set and applied to the val and test sets.
+    :return: A normalized copy training, validation, and test DataFrames.
+    :rtype: tuple
+    """
     df_train, df_val, df_test = df_train.copy(), df_val.copy(), df_test.copy()
 
-    scalar_features = ["PACKETS", "PACKETS_REV", "BYTES", "BYTES_REV", "DURATION"]
-    port_features = ["SRC_PORT", "DST_PORT"]
+    scalars = ["PACKETS", "PACKETS_REV", "BYTES", "BYTES_REV", "DURATION"]
 
-    for col in scalar_features:
+    for col in scalars:
         df_train[col] = np.log1p(df_train[col])
         df_val[col] = np.log1p(df_val[col])
         df_test[col] = np.log1p(df_test[col])
 
     scaler = StandardScaler()
-    df_train[scalar_features] = scaler.fit_transform(df_train[scalar_features])
-    df_val[scalar_features] = scaler.transform(df_val[scalar_features])
-    df_test[scalar_features] = scaler.transform(df_test[scalar_features])
+    df_train[scalars] = scaler.fit_transform(df_train[scalars])
+    df_val[scalars] = scaler.transform(df_val[scalars])
+    df_test[scalars] = scaler.transform(df_test[scalars])
+
+    def one_hot_encode_protocol(df):
+        def map_protocol(proto):
+            if proto == 6:
+                return "TCP"
+            elif proto == 17:
+                return "UDP"
+            elif proto == 1:
+                return "ICMP"
+            else:
+                return "OTHER"
+
+        # Map protocols to categories
+        df["PROTOCOL_CAT"] = df["PROTOCOL"].apply(map_protocol)
+        protocol_onehot = pd.get_dummies(df["PROTOCOL_CAT"], prefix="PROTO")
+        df = pd.concat([df, protocol_onehot], axis=1)
+        df.drop(columns=["PROTOCOL_CAT"], inplace=True)
+        return df
+
+    df_train = one_hot_encode_protocol(df_train)
+    df_val = one_hot_encode_protocol(df_val)
+    df_test = one_hot_encode_protocol(df_test)
+
+    def bin_port(port):
+        # common ports get separate bin
+        if port in [
+            0, # NULL
+            137, # NetBIOS
+            138, # NetBIOS
+            139, # NetBIOS
+            20, # FTP command
+            21, # FTP data
+            22, # SSH
+            23, # Telnet
+            25, # SMTP
+            110, # POP3
+            143, # IMAP
+            443, # HTTPS
+            445, # SMB
+            53, # DNS
+            53, # DNS
+            80, # HTTP
+            587, # Email submission
+            1433, # MS SQL
+            3306, # MySQL
+            3389, # RDP
+            8080, # HTTP alternate
+            9001, # Tor
+        ]:
+            return str(port)
+        elif port < 1024:
+            return "standard"
+        elif port < 49152:
+            return "non-standard"
+        else:
+            return "dynamic"
+
+    # df["SRC_PORT_BIN"] = df["SRC_PORT"].apply(bin_port)
+    # df["DST_PORT_BIN"] = df["DST_PORT"].apply(bin_port)
 
     scaler = StandardScaler()
     for col in ["PPI_PKT_LENGTHS", "PPI_PKT_TIMES"]:
-        df_train[col] = list(scaler.fit_transform(np.vstack(df_train[col].values)))  # shape: (num_rows, 30)
+        df_train[col] = list(
+            scaler.fit_transform(np.vstack(df_train[col].values))
+        )  # shape: (num_rows, 30)
         df_val[col] = list(scaler.transform(np.vstack(df_val[col].values)))
         df_test[col] = list(scaler.transform(np.vstack(df_test[col].values)))
 
-    df_train['DURATION'] = df_train['DURATION'].fillna(0)
-    df_val['DURATION'] = df_val['DURATION'].fillna(0)
-    df_test['DURATION'] = df_test['DURATION'].fillna(0)
+    df_train["DURATION"] = df_train["DURATION"].fillna(0)
+    df_val["DURATION"] = df_val["DURATION"].fillna(0)
+    df_test["DURATION"] = df_test["DURATION"].fillna(0)
     return df_train, df_val, df_test
 
 
@@ -197,33 +271,18 @@ def clean(df):
     df = remove_extreme_packet_count_samples(df, min=4, max=1e6)
     print(f"Samples after removing extreme packet counts: {sample_count(df)}")
 
-    keep_cols = [
-        "family",
-        "sample",
-        "DNS_ID",
-        "DNS_NAME",
-        "SRC_IP",
-        "DST_IP",
-        "SRC_PORT",
-        "DST_PORT",
-        "PROTOCOL",
-        "PACKETS",
-        "PACKETS_REV",
-        "BYTES",
-        "BYTES_REV",
-        "TIME_FIRST",
-        "TIME_LAST",
-        "PPI_PKT_LENGTHS",
-        "PPI_PKT_DIRECTIONS",
-        "PPI_PKT_TIMES",
-    ]
     # these are the cols that stitch_dns uses and can aggr right now
+    keep_cols = (
+        stitch_dns.STITCH_COLS
+        + stitch_dns.FLOW_TUPLE_COLS
+        + list(stitch_dns.COL_AGG_FUNCS.keys())
+    )
     df = df[keep_cols]
     # has to be done before stitch_dns to be able to aggregate PPI cols
     df = _parse_ppi(df)
-    df['TIME_FIRST'] = pd.to_datetime(df['TIME_FIRST'], format=DATE_FORMAT)
-    df['TIME_LAST'] = pd.to_datetime(df['TIME_LAST'], format=DATE_FORMAT)
-    df['DURATION'] = (df['TIME_LAST'] - df['TIME_FIRST']).dt.total_seconds()
+    df["TIME_FIRST"] = pd.to_datetime(df["TIME_FIRST"], format=DATE_FORMAT)
+    df["TIME_LAST"] = pd.to_datetime(df["TIME_LAST"], format=DATE_FORMAT)
+    df["DURATION"] = (df["TIME_LAST"] - df["TIME_FIRST"]).dt.total_seconds()
 
     print("Stitching DNS samples...")
     df = stitch_dns_uniflows(df)
@@ -248,8 +307,6 @@ def clean(df):
 
 
 def prepare_features(df) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
-    # df["label_encoded"], _ = pd.factorize(df["family"])
-    # print(f'Encoded families: {df.groupby("family")["label_encoded"].first()}')
     print("Splitting dataset...")
     train, val, test = train_val_test_split(df, VAL_SIZE, TEST_SIZE)
     print(
@@ -257,7 +314,7 @@ def prepare_features(df) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
     )
 
     print("Normalizing and scaling dataset...")
-    train, val, test = normalize_scale(train, val, test)
+    train, val, test = normalize_splits(train, val, test)
     print("Normalization and scaling done:")
     print(train.head())
 

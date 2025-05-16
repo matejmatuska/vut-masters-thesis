@@ -70,6 +70,7 @@ if __name__ == '__main__':
     model = get_model_factory(args.model)(
         train_set,
         hidden_dim=args.hidden,
+        port_dim=2,
         dropout=args.dropout,
         nlayers=args.layers,
     ).to(device)

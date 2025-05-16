@@ -79,6 +79,7 @@ def objective(trial: optuna.Trial) -> float:
     model = model_factory(
         train_set,
         hidden_dim=hidden_dim,
+        port_dim=2,
         dropout=dropout,
         nlayers=num_layers,
     ).to(device)
@@ -171,6 +172,7 @@ with mlflow.start_run(run_name=args.mlflow_run):
     model = model_factory(
         train_set,
         hidden_dim=best_trial.params["hidden_dim"],
+        port_dim=2,
         dropout=best_trial.params["dropout"],
         nlayers=best_trial.params["num_layers"],
     ).to(device)
