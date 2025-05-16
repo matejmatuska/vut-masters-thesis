@@ -5,6 +5,7 @@ import mlflow
 import numpy as np
 import seaborn as sns
 import torch
+from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.utils.class_weight import compute_class_weight
 
 
@@ -63,7 +64,7 @@ class EarlyStopping:
         return self.stop
 
 
-def log_conf_matrix(cm, path="confusion_matrix.png"):
+def log_conf_matrix(cm, artifact_file):
     plt.figure(figsize=(8, 6))
     ticks = np.arange(0, cm.shape[0])
     sns.heatmap(
@@ -73,8 +74,19 @@ def log_conf_matrix(cm, path="confusion_matrix.png"):
     plt.xlabel("Predicted")
     plt.ylabel("True")
 
-    mlflow.log_figure(plt.gcf(), path)
+    mlflow.log_figure(plt.gcf(), artifact_file)
     plt.close()
+
+
+def log_class_stats(all_preds, all_labels, suffix):
+    conf_matrix = confusion_matrix(all_labels, all_preds)
+    log_conf_matrix(conf_matrix, artifact_file=f"confusion_matrix_{suffix}.pdf")
+
+    print("\nClassification Report:")
+    print(classification_report(all_labels, all_preds, digits=4))
+
+    report_dict = classification_report(all_labels, all_preds, output_dict=True)
+    mlflow.log_dict(report_dict, artifact_file=f"classification_report_{suffix}.json")
 
 
 def compute_class_weights(dataset):

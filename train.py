@@ -3,75 +3,12 @@ import time
 
 import mlflow
 import torch
-from sklearn.metrics import classification_report, confusion_matrix, f1_score
 from torch_geometric.loader import DataLoader
 from torch_geometric.logging import log
 from torch_geometric.transforms import NormalizeFeatures
 
+from train_common import train, evaluate, get_dataset_factory, get_model_factory
 import utils
-from dataset import ChronoDataset, Repr1Dataset, SunDataset
-from model.baseline import GraphClassifier
-from model.chrono import ChronoClassifier
-from model.repr1 import Repr1Classifier
-
-
-def train(model, loader, optimizer, criterion, device):
-    model.train()
-
-    total_loss = 0
-
-    for data in loader:
-        optimizer.zero_grad()
-        data = data.to(device)
-        out = model(data)
-        loss = criterion(out, data.y)
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
-
-    return total_loss / len(loader)
-
-
-def evaluate(which, model, loader, criterion, device, log=False, f1_average='macro'):
-    model.eval()
-    all_preds = []
-    all_labels = []
-
-    total_loss = 0
-    correct = 0
-    total = 0
-
-    with torch.no_grad():
-        for data in loader:
-            data = data.to(device)
-            out = model(data)
-            loss = criterion(out, data.y)
-            total_loss += loss.item()
-
-            _, predicted = torch.max(out, 1)
-            all_preds.append(predicted.cpu())
-            all_labels.append(data.y.cpu())
-
-            total += data.y.size(0)
-            correct += (predicted == data.y).sum().item()
-
-    all_preds = torch.cat(all_preds).numpy()
-    all_labels = torch.cat(all_labels).numpy()
-
-    if log:
-        conf_matrix = confusion_matrix(all_labels, all_preds)
-        utils.log_conf_matrix(conf_matrix)
-
-        print("\nClassification Report:")
-        print(classification_report(all_labels, all_preds, digits=4))
-
-        report_dict = classification_report(all_labels, all_preds, output_dict=True)
-        mlflow.log_dict(report_dict, artifact_file="classification_report.json")
-
-    f1 = f1_score(all_labels, all_preds, average=f1_average)
-    avg_loss = total_loss / len(loader)
-    accuracy = correct / total
-    return avg_loss, accuracy, f1
 
 
 def parse_args():
@@ -91,74 +28,12 @@ def parse_args():
     parser.add_argument("--device", type=str, default="cpu", choices=["cuda", "cpu"], help="Device to run training on")
 
     parser.add_argument("--patience", type=int, default=20, help="Early stopping patience")
-    parser.add_argument("--tolerance", type=int, default=5e-3, help="Early stopping tolerance")    
+    parser.add_argument("--tolerance", type=float, default=5e-3, help="Early stopping tolerance")
 
     parser.add_argument("--mlflow-uri", type=str, default="http://localhost:5000", help="MLflow tracking URI")
     parser.add_argument("--mlflow-experiment", type=str, default="xmatus36-gnns", help="MLflow experiment name")
     parser.add_argument("--mlflow-run", type=str, help="MLflow run name")
     return parser.parse_args()
-
-
-def get_dataset_factory(which) -> (callable):
-    if which == "baseline":
-        def creator(root, split, **kwargs) -> SunDataset:
-            return SunDataset(
-                root,
-                split,
-                **kwargs,
-            )
-    elif which == "chrono":
-        def creator(root, split, **kwargs) -> ChronoDataset:
-            return ChronoDataset(
-                root,
-                split,
-                **kwargs,
-            )
-    elif which == "repr1":
-        def creator(root, split, **kwargs) -> Repr1Dataset:
-            return Repr1Dataset(
-                root,
-                split,
-                **kwargs,
-            )
-    else:
-        raise ValueError("Invalid model type. Choose 'baseline', 'chrono' or 'repr1'.")
-    return creator
-
-
-def get_model_factory(which) -> (callable):
-    if which == "baseline":
-        def make_model(dataset, hidden_dim, dropout, nlayers=2):
-            return GraphClassifier(
-                edge_dim=dataset[0].edge_attr.size(1),
-                hidden_dim=hidden_dim,
-                num_classes=dataset.num_classes,
-                layers=nlayers,
-                dropout=dropout,
-            )
-    elif which == "chrono":
-        def make_model(dataset, hidden_dim, dropout, nlayers=2):
-            return ChronoClassifier(
-                input_dim=dataset[0].num_node_features,
-                hidden_dim=hidden_dim,
-                num_classes=dataset.num_classes,
-                layers=nlayers,
-                dropout=dropout,
-            )
-    elif args.model == "repr1":
-        def make_model(dataset, hidden_dim, dropout, nlayers=2):
-            return Repr1Classifier(
-                input_dim=97,
-                num_hosts=0, # TODO unused
-                hidden_dim=hidden_dim,
-                num_classes=dataset.num_classes,
-                layers=nlayers,
-                dropout=dropout,
-            )
-    else:
-        # should not reach here, handled by argparse
-        raise ValueError("Invalid model type. Choose 'baseline', 'chrono' or 'repr1'.")
-    return make_model
 
 
 if __name__ == '__main__':
@@ -205,6 +80,8 @@ if __name__ == '__main__':
     criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
     early_stopping = utils.EarlyStopping(patience=args.patience, tolerance=args.tolerance)
 
+    all_preds = None
+    all_labels = None
     mlflow.set_tracking_uri(uri=args.mlflow_uri)
     mlflow.set_experiment(args.mlflow_experiment)
     with mlflow.start_run(run_name=args.mlflow_run):
@@ -216,7 +93,9 @@ if __name__ == '__main__':
             start = time.time()
 
             train_loss = train(model, train_loader, optimizer, criterion, device)
-            val_loss, val_acc, val_f1 = evaluate(model, val_loader, criterion, device, epoch == args.epochs)
+            val_loss, val_acc, val_f1, all_preds, all_labels = evaluate(
+                model, val_loader, criterion, device
+            )
 
             mlflow.log_metrics({
                 "train_loss": train_loss,
@@ -233,13 +112,19 @@ if __name__ == '__main__':
                 break
 
         mlflow.log_metric('median_epoch_time', torch.tensor(times).median())
+        utils.log_class_stats(all_preds, all_labels, suffix="val")
 
         # Evaluate on the test set
         model.load_state_dict(early_stopping.best_model_state)
-        test_loss, test_acc, test_f1 = evaluate(model, test_loader, criterion, device, True)
+        test_loss, test_acc, test_f1, all_preds, all_labels = evaluate(
+            model, test_loader, criterion, device
+        )
+
         mlflow.log_metrics({
             "test_loss": test_loss,
             "test_accuracy": test_acc,
             "test_f1": test_f1,
         }, step=epoch)
+        utils.log_class_stats(all_preds, all_labels, suffix="test")
+
         print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_acc:.4f}, Test F1: {test_f1:.4f}")
