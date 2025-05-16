@@ -120,6 +120,7 @@ if __name__ == '__main__':
             model, test_loader, criterion, device
         )
 
+        mlflow.pytorch.log_model(model, "model")
         mlflow.log_metrics({
             "test_loss": test_loss,
             "test_accuracy": test_acc,

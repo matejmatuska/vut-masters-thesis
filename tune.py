@@ -176,6 +176,8 @@ with mlflow.start_run(run_name=args.mlflow_run):
     ).to(device)
     model.load_state_dict(torch.load(model_path))
 
+    mlflow.pytorch.log_model(model, "model")
+
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=best_trial.params["lr"],
