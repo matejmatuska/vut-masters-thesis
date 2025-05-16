@@ -9,52 +9,18 @@ import torch
 from torch_geometric.data import Data, HeteroData, InMemoryDataset
 from torch_geometric.utils import from_networkx
 
-DEFAULT_ATTRIBUTES = [
+SCALAR_ATTRIBUTES = [
     "PACKETS",
     "PACKETS_REV",
     "BYTES",
     "BYTES_REV",
     "DURATION",
 ]
-PPI_ATTRIBUTES = [
+VECTOR_ATTRIBUTES = [
     "PPI_PKT_LENGTHS",
     "PPI_PKT_TIMES",
     "PPI_PKT_DIRECTIONS",
 ]
-
-
-def _parse_ppi(df):
-    # TODO better docstring
-    """
-    Parse PPI_PKT_LENGTHS and PPI_PKT_TIMES in the [x|y|z|...] format into Python lists.
-    """
-    df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].str.replace("|", ",")
-    df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].apply(literal_eval)
-
-    df["PPI_PKT_DIRECTIONS"] = df["PPI_PKT_DIRECTIONS"].str.replace("|", ",")
-    df["PPI_PKT_DIRECTIONS"] = df["PPI_PKT_DIRECTIONS"].apply(literal_eval)
-
-    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].str[1:-1].str.split("|")
-    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(
-        pd.to_datetime, format="%Y-%m-%dT%H:%M:%S.%f"
-    )
-    return df
-
-
-def load_dataset_csv(path) -> pd.DataFrame:
-    """
-    Load a dataset from a CSV file.
-
-    :param path: Path to the CSV file.
-    :type path: str
-    :param samples: A tuple (min_samples, max_samples) to filter the dataset.
-    :return: The loaded and prepared CSV dataset.
-    :rtype: pandas.DataFrame
-    """
-    df = pd.read_csv(path)
-    df["label_encoded"], _ = pd.factorize(df["family"])
-    print(f'Encoded familites: {df.groupby("family")["label_encoded"].first()}')
-    return df
 
 
 class BaseGraphDataset(InMemoryDataset, ABC):
@@ -62,7 +28,7 @@ class BaseGraphDataset(InMemoryDataset, ABC):
     Base class for creating graph datasets.
 
     This class is designed to be subclassed for specific graph representations.
-    The subclass should implement the `sample_to_graph` method to convert a sample DataFrame into a graph.
+    A subclass should implement the `sample_to_graph` method to convert a sample DataFrame into a graph.
     """
 
     def __init__(
@@ -109,20 +75,27 @@ class BaseGraphDataset(InMemoryDataset, ABC):
         """
         pass
 
+    def _load_dataset_parquet(self, path) -> pd.DataFrame:
+        """
+        Load a dataset from a .parquet file.
+
+        :param path: Path to the .parquet file.
+        :type path: str
+        :param samples: A tuple (min_samples, max_samples) to filter the dataset.
+        :return: The loaded and prepared CSV dataset.
+        :rtype: pandas.DataFrame
+        """
+        df = pd.read_parquet(path)
+        df["label_encoded"], _ = pd.factorize(df["family"])
+        print(f"Encoded familites: {df.groupby('family')['label_encoded'].first()}")
+        return df
+
     def process(self):
-        df = load_dataset_csv(os.path.join(self.raw_dir, f"{self.split}.parquet"))
+        df = self._load_dataset_parquet(os.path.join(self.raw_dir, f"{self.split}.parquet"))
 
         data_list = []
         for sample_name, group in df.groupby("sample"):
             print(f"Processing sample: '{sample_name}'")
-
-            # TODO these should no longer be needed
-            if df.empty:
-                print(f"Sample {sample_name} is empty. Skipping.")
-                continue
-            if df.shape[0] < 2:
-                print(f"Sample {sample_name} is < 2. Skipping.")
-                continue
 
             graph = self.sample_to_graph(group)
             if graph:
@@ -163,8 +136,8 @@ class SunDataset(BaseGraphDataset):
             src_ip = row["SRC_IP"]
             dst_ip = row["DST_IP"]
 
-            edge_attr = row[DEFAULT_ATTRIBUTES].to_list()
-            for attr in PPI_ATTRIBUTES:
+            edge_attr = row[SCALAR_ATTRIBUTES].to_list()
+            for attr in VECTOR_ATTRIBUTES:
                 edge_attr.extend(row[attr])
             G.add_edge(src_ip, dst_ip, feature=edge_attr)
 
@@ -183,12 +156,11 @@ class SunDataset(BaseGraphDataset):
                 agg_data = {}
                 for key, val_list in data.items():
                     stacked = np.vstack(val_list)  # shape: (num_edges, feature_dim)
-                    agg_data[key] = aggfunc(stacked, axis=0)  # mean across edges
+                    agg_data[key] = aggfunc(stacked, axis=0)
                 G.add_edge(u, v, **agg_data)
             return G
 
         agg_G = aggregate_edges(G)
-        # assert not any(nx.isolates(agg_G))
         return agg_G
 
     @override
@@ -226,47 +198,47 @@ class ChronoDataset(BaseGraphDataset):
         """
 
         def node_key(row):
-            # TODO just some unique key for nodes
-            return f"{row['SRC_IP']}:{row['SRC_PORT']}\n{row['DST_IP']}:{row['DST_PORT']}-{row['PROTOCOL']}"
+            # just some unique key for nodes, required for networkx NOT used as a feature
+            return f"{row['SRC_IP']}:{row['SRC_PORT']}\n{row['DST_IP']}:{row['DST_PORT']}-{row['TIME_FIRST']}"
 
         G = nx.DiGraph()
         # first make the forward edges
         df = df.sort_values(by="TIME_FIRST", ascending=True).reset_index(drop=True)
         prev = df.iloc[0]
+        prev_node = node_key(prev)
+
+        prev_attrs = prev[SCALAR_ATTRIBUTES].to_dict()
+        for attr in VECTOR_ATTRIBUTES:
+            prev_attrs[attr] = prev[attr]
+        G.add_node(prev_node, **prev_attrs)
+
         for _, curr in df.iloc[1:].iterrows():
-            prev_node = node_key(prev)
             curr_node = node_key(curr)
 
-            prev_attrs = prev[DEFAULT_ATTRIBUTES].to_dict()
-            for attr in PPI_ATTRIBUTES:
-                prev_attrs[attr] = prev[attr]
-
-            curr_attrs = curr[DEFAULT_ATTRIBUTES].to_dict()
-            for attr in PPI_ATTRIBUTES:
+            curr_attrs = curr[SCALAR_ATTRIBUTES + PROTO_ONE_HOT].to_dict()
+            for attr in VECTOR_ATTRIBUTES:
                 curr_attrs[attr] = curr[attr]
 
-            G.add_node(prev_node, **prev_attrs)
             G.add_node(curr_node, **curr_attrs)
             G.add_edge(prev_node, curr_node)  # no edge attributes
-            prev = curr
+            prev_node = curr_node
 
         # now the reverse edges
         reverse = df.sort_values(by="TIME_LAST", ascending=True)
         prev = reverse.iloc[0]
+        prev_node = node_key(prev)
         for _, curr in reverse.iloc[1:].iterrows():
-            prev_node = node_key(prev)
             curr_node = node_key(curr)
-
             # .name is the index of the row
             # FIXME rename the index to something more meaningful
             if curr.name - prev.name > 1:
-                G.add_edge(node_key(curr), node_key(prev))
+                G.add_edge(curr_node, prev_node)
 
             if curr.name - prev.name < -1:
-                G.add_edge(node_key(prev), node_key(curr))
+                G.add_edge(prev_node, curr_node)
 
             prev = curr
-        return G
+            prev_node = curr_node
 
     @override
     def sample_to_graph(self, df):
@@ -317,9 +289,9 @@ class Repr1Dataset(BaseGraphDataset):
             src_id = host_ip_to_id[row["SRC_IP"]]
             dst_id = host_ip_to_id[row["DST_IP"]]
 
-            attrs = row[DEFAULT_ATTRIBUTES].to_dict()
+            attrs = row[SCALAR_ATTRIBUTES].to_dict()
             attr_vals = list(attrs.values())
-            for attr in PPI_ATTRIBUTES:
+            for attr in VECTOR_ATTRIBUTES:
                 attr_vals.extend(row[attr])
             flow_attrs.append(attr_vals)
 
