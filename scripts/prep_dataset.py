@@ -5,10 +5,16 @@ from ast import literal_eval
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, StandardScaler
+from sklearn.preprocessing import StandardScaler
 from stitch_dns import stitch_dns
 
 DATE_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
+PPI_PAD_LEN = 30
+VAL_SIZE = 0.15
+TEST_SIZE = 0.15
+
+TOO_FEW_SAMPLES = 500
+TOO_MANY_SAMPLES = 2000
 
 
 def sample_count(df):
@@ -16,9 +22,8 @@ def sample_count(df):
 
 
 def _parse_ppi(df):
-    # TODO better docstring
     """
-    Parse PPI_PKT_LENGTHS and PPI_PKT_TIMES in the [x|y|z|...] format into Python lists.
+    Parse the per-packet information (PPI) fields into Python lists.
     """
     df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].str.replace("|", ",")
     df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].apply(literal_eval)
@@ -27,9 +32,7 @@ def _parse_ppi(df):
     df["PPI_PKT_DIRECTIONS"] = df["PPI_PKT_DIRECTIONS"].apply(literal_eval)
 
     df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].str[1:-1].str.split("|")
-    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(
-        pd.to_datetime, format=DATE_FORMAT
-    )
+    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(pd.to_datetime, format=DATE_FORMAT)
     return df
 
 
@@ -73,7 +76,7 @@ def stitch_dns_uniflows(df) -> pd.DataFrame:
 
 def remove_extreme_packet_count_samples(df, min=4, max=1e6) -> pd.DataFrame:
     """
-    Remove samples with very few or very many packets.
+    Remove samples outside the specified packet count range.
     """
     group_sums = df.groupby("sample")[["PACKETS", "PACKETS_REV"]].transform("sum")
     return df[(group_sums.sum(axis=1) > min) & (group_sums.sum(axis=1) < max)]
@@ -108,7 +111,7 @@ def normalize_all(df, per_packet_len=30) -> pd.DataFrame:
     def times_to_relative(timestamps):
         base = timestamps[0]
         relative_times = [(ts - base).total_seconds() for ts in timestamps]
-        # TODO maybe?? Measure. Exclude the first timestamp since it's always 0 - can use 0 for padding
+        # Exclude the first timestamp since it's always 0 - can use 0 for padding
         return relative_times[1:]
 
     df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(times_to_relative)
@@ -232,13 +235,13 @@ def clean(df):
 
     print("Capping samples per family...")
     # WARN: there is no check if there are enough samples
-    df = cap_samples_per_fam(df, 500, 2000)
+    df = cap_samples_per_fam(df, TOO_FEW_SAMPLES, TOO_MANY_SAMPLES)
     print(df[["family", "sample"]].drop_duplicates()["family"].value_counts())
     print(df[["family", "sample"]].drop_duplicates()["family"].value_counts().sum())
     print(f"Samples after capping: {sample_count(df)}")
 
     print("Normalizing dataset")
-    df = normalize_all(df, per_packet_len=30)
+    df = normalize_all(df, per_packet_len=PPI_PAD_LEN)
     print("Normalizing done:")
     print(df.head())
     return df
@@ -248,8 +251,10 @@ def prepare_features(df) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
     # df["label_encoded"], _ = pd.factorize(df["family"])
     # print(f'Encoded families: {df.groupby("family")["label_encoded"].first()}')
     print("Splitting dataset...")
-    train, val, test = train_val_test_split(df, 0.15, 0.15)
-    print(f"Split: Train: {sample_count(train)}, Val: {sample_count(val)}, Test: {sample_count(test)}")
+    train, val, test = train_val_test_split(df, VAL_SIZE, TEST_SIZE)
+    print(
+        f"Split: Train: {sample_count(train)}, Val: {sample_count(val)}, Test: {sample_count(test)}"
+    )
 
     print("Normalizing and scaling dataset...")
     train, val, test = normalize_scale(train, val, test)
