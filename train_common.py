@@ -1,10 +1,10 @@
 import torch
 from sklearn.metrics import f1_score
 
-from dataset import ChronoDataset, Repr1Dataset, SunDataset
-from model.baseline import GraphClassifier
-from model.chrono import ChronoClassifier
+from dataset import Repr1Dataset, Repr2Dataset, BaselineDataset
+from model.baseline import BaselineClassifier
 from model.repr1 import Repr1Classifier
+from model.repr2 import Repr2Classifier
 
 
 def train(model, loader, optimizer, criterion, device):
@@ -59,16 +59,8 @@ def evaluate(model, loader, criterion, device, f1_average="macro"):
 def get_dataset_factory(which) -> callable:
     if which == "baseline":
 
-        def creator(root, split, **kwargs) -> SunDataset:
-            return SunDataset(
-                root,
-                split,
-                **kwargs,
-            )
-    elif which == "chrono":
-
-        def creator(root, split, **kwargs) -> ChronoDataset:
-            return ChronoDataset(
+        def creator(root, split, **kwargs) -> BaselineDataset:
+            return BaselineDataset(
                 root,
                 split,
                 **kwargs,
@@ -81,8 +73,16 @@ def get_dataset_factory(which) -> callable:
                 split,
                 **kwargs,
             )
+    elif which == "repr2":
+
+        def creator(root, split, **kwargs) -> Repr2Dataset:
+            return Repr2Dataset(
+                root,
+                split,
+                **kwargs,
+            )
     else:
-        raise ValueError("Invalid model type. Choose 'baseline', 'chrono' or 'repr1'.")
+        raise ValueError("Invalid model type. Choose 'baseline', 'repr1' or 'repr2'.")
     return creator
 
 
@@ -90,19 +90,8 @@ def get_model_factory(which) -> callable:
     if which == "baseline":
 
         def make_model(dataset, hidden_dim, port_dim, dropout, nlayers):
-            return GraphClassifier(
+            return BaselineClassifier(
                 edge_dim=dataset[0].edge_attr.size(1),
-                port_dim=port_dim,
-                hidden_dim=hidden_dim,
-                num_classes=dataset.num_classes,
-                layers=nlayers,
-                dropout=dropout,
-            )
-    elif which == "chrono":
-
-        def make_model(dataset, hidden_dim, port_dim, dropout, nlayers):
-            return ChronoClassifier(
-                input_dim=dataset[0].num_node_features,
                 port_dim=port_dim,
                 hidden_dim=hidden_dim,
                 num_classes=dataset.num_classes,
@@ -113,6 +102,17 @@ def get_model_factory(which) -> callable:
 
         def make_model(dataset, hidden_dim, port_dim, dropout, nlayers):
             return Repr1Classifier(
+                input_dim=dataset[0].num_node_features,
+                port_dim=port_dim,
+                hidden_dim=hidden_dim,
+                num_classes=dataset.num_classes,
+                layers=nlayers,
+                dropout=dropout,
+            )
+    elif which == "repr2":
+
+        def make_model(dataset, hidden_dim, port_dim, dropout, nlayers):
+            return Repr2Classifier(
                 flow_dim=dataset[0]["NetworkFlow"].x.size(1),
                 hidden_dim=hidden_dim,
                 port_dim=port_dim,
@@ -122,5 +122,5 @@ def get_model_factory(which) -> callable:
             )
     else:
         # should not reach here, handled by argparse
-        raise ValueError("Invalid model type. Choose 'baseline', 'chrono' or 'repr1'.")
+        raise ValueError("Invalid model type. Choose 'baseline', 'repr1' or 'repr2'.")
     return make_model

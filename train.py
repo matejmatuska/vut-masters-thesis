@@ -15,7 +15,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Run a single training and evaluation run")
 
     parser.add_argument("dataset_path", type=str, help="Path to the dataset")
-    parser.add_argument("model", type=str, choices=["baseline", "chrono", "repr1"], help="Model to train")
+    parser.add_argument("model", type=str, choices=["baseline", "repr1", "repr2"], help="Model to train")
 
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training and testing")

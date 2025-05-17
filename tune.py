@@ -17,7 +17,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Training script arguments")
 
     parser.add_argument("dataset_path", type=str, help="Path to the dataset")
-    parser.add_argument("model", type=str, choices=["baseline", "chrono", "repr1"], help="Model to train")
+    parser.add_argument("model", type=str, choices=["baseline", "repr1", "repr2"], help="Model to train")
     parser.add_argument("--device", type=str, default="cpu", choices=["cuda", "cpu"], help="Device to run training on")
 
     parser.add_argument("--trials", type=int, default=30, help="Number of trials for hyperparameter tuning")

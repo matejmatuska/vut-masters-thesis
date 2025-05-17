@@ -24,7 +24,7 @@ class EdgeMPNN(MessagePassing):
         return x_j + edge_attr
 
 
-class GraphClassifier(torch.nn.Module):  # TODO better names
+class BaselineClassifier(torch.nn.Module):
     def __init__(self, edge_dim, hidden_dim, port_dim, num_classes, layers, dropout):
         super().__init__()
         tcp_dim = 2
@@ -49,7 +49,6 @@ class GraphClassifier(torch.nn.Module):  # TODO better names
         self.gnn_layers = nn.ModuleList(
             [EdgeMPNN(self.edge_mlp, dropout) for _ in range(layers)]
         )
-        # self.gnn = EdgeMPNN(edge_dim, self.edge_mlp, dropout=dropout)
         self.pool = global_max_pool
         self.classifier = torch.nn.Sequential(
             torch.nn.Linear(hidden_dim, hidden_dim),

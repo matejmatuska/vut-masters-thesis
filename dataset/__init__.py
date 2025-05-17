@@ -152,7 +152,7 @@ class BaseGraphDataset(InMemoryDataset, ABC):
         )
 
 
-class SunDataset(BaseGraphDataset):
+class BaselineDataset(BaseGraphDataset):
     def __init__(
         self, root, split, transform=None, pre_transform=None, pre_filter=None
     ):
@@ -236,7 +236,7 @@ class SunDataset(BaseGraphDataset):
         return data
 
 
-class ChronoDataset(BaseGraphDataset):
+class Repr1Dataset(BaseGraphDataset):
     def __init__(
         self, root, split, transform=None, pre_transform=None, pre_filter=None
     ):
@@ -319,7 +319,7 @@ class ChronoDataset(BaseGraphDataset):
         return data
 
 
-class Repr1Dataset(BaseGraphDataset):
+class Repr2Dataset(BaseGraphDataset):
     def __init__(
         self, root, split, transform=None, pre_transform=None, pre_filter=None
     ):
