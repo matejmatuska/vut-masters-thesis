@@ -14,14 +14,7 @@ DEFAULT_ATTRIBUTES = [
     "PACKETS_REV",
     "BYTES",
     "BYTES_REV",
-    # TODO 'TCP_FLAGS',
-    # TODO 'TCP_FLAGS_REV',
-    "PROTOCOL",
-    "SRC_PORT",
-    "DST_PORT",
-    # "DURATION",
-    # "TIME_FIRST",
-    # "TIME_LAST",
+    "DURATION",
 ]
 PPI_ATTRIBUTES = [
     "PPI_PKT_LENGTHS",

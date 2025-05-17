@@ -13,16 +13,17 @@ class Repr1Classifier(torch.nn.Module):
 
     def __init__(self, input_dim, num_hosts, hidden_dim, num_classes, layers, dropout=0.0):
         super().__init__()
-        self.dropout = dropout
         self.hidden_dim = hidden_dim
-
+        self.dropout = dropout
         # self.host_embed = torch.nn.Embedding(4000, hidden_dim)
+
+        flow_dim = 95  # TODO: do not hardcode
 
         self.convs = torch.nn.ModuleList()
         self.convs.append(HeteroConv({
-            ('Host', 'communicates', 'NetworkFlow'): GraphConv((hidden_dim, 97), hidden_dim),
-            ('NetworkFlow', 'communicates', 'Host'): GraphConv((97, -1), hidden_dim),
-            ('NetworkFlow', 'related', 'NetworkFlow'): GraphConv(97, hidden_dim),
+            ('Host', 'communicates', 'NetworkFlow'): GraphConv((hidden_dim, flow_dim), hidden_dim),
+            ('NetworkFlow', 'communicates', 'Host'): GraphConv((flow_dim, -1), hidden_dim),
+            ('NetworkFlow', 'related', 'NetworkFlow'): GraphConv(flow_dim, hidden_dim),
         }, aggr='sum'))
 
         for i in range(layers - 1):
