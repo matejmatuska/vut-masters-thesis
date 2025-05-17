@@ -105,23 +105,10 @@ def normalize(df, per_packet_len=30, scalerf=MinMaxScaler) -> pd.DataFrame:
     :rtype: pandas.DataFrame
     """
     df = df.copy()
-    scalar_features = ["PACKETS", "PACKETS_REV", "BYTES", "BYTES_REV"]
-    port_features = ["SRC_PORT", "DST_PORT"]
-
-    for col in scalar_features:
-        df[col] = np.log1p(df[col])
-
-    scalar_scaler = scalerf()
-    df[scalar_features] = scalar_scaler.fit_transform(df[scalar_features])
-
-    # one hot encode PROTOCOL
-    df["PROTOCOL_CAT"] = df["PROTOCOL"].astype("category").cat.codes
 
     def normalize_times(timestamps):
         base = timestamps[0]
         relative_times = [(ts - base).total_seconds() for ts in timestamps]
-        #deltas = np.diff(timestamps)
-        #return deltas
         # TODO maybe?? Measure. Exclude the first timestamp since it's always 0 - can use 0 for padding
         return relative_times[1:]
 
@@ -133,21 +120,9 @@ def normalize(df, per_packet_len=30, scalerf=MinMaxScaler) -> pd.DataFrame:
         return np.pad(lst, (0, pad_width), "constant", constant_values=value)
 
     # Ensure fixed-length arrays (padding or truncating to 30)
-    print(df["PPI_PKT_TIMES"].head())
     for col in ["PPI_PKT_TIMES", "PPI_PKT_LENGTHS", "PPI_PKT_DIRECTIONS"]:
         df[col] = df[col].apply(pad_or_truncate, args=(per_packet_len, 0))
 
-    def norm_2d(col):
-        X = np.vstack(col.values)  # shape: (num_rows, 30)
-        scaled = StandardScaler().fit_transform(X)
-        return scaled.tolist()
-
-    df["PPI_PKT_LENGTHS"] = norm_2d(df["PPI_PKT_LENGTHS"])
-    df["PPI_PKT_TIMES"] = norm_2d(df["PPI_PKT_TIMES"])
-
-    # def normalize_times(timestamps):
-    #     deltas = np.diff(timestamps)
-    #     return norm_arr_logstd(deltas)
     return df
 
 
