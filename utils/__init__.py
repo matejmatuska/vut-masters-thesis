@@ -34,11 +34,6 @@ class EarlyStopping:
                 self.best_loss = current_loss
                 self._data_at_best = kwargs
                 self._best_model_state = copy.deepcopy(model.state_dict())
-
-        if current_loss < self.best_loss - self.tolerance:
-            self.best_loss = current_loss
-            self._data_at_best = kwargs
-            self._best_model_state = model.state_dict()
             self.wait = 0
         else:
             self.wait += 1
