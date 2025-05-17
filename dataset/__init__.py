@@ -58,7 +58,13 @@ class BaseGraphDataset(InMemoryDataset, ABC):
         self.split = split
 
         super().__init__(root, transform, pre_transform, pre_filter)
-        self.load(self.processed_paths[0])
+
+        out = torch.load(self.processed_paths[0])
+        assert isinstance(out, tuple)
+        assert len(out) == 4
+        data, self.slices, data_cls, extra_attrs = out
+        self.data = data_cls.from_dict(data)
+        self._label_map = extra_attrs["label_map"]
 
     @property
     def raw_file_names(self):
@@ -67,6 +73,15 @@ class BaseGraphDataset(InMemoryDataset, ABC):
     @property
     def processed_file_names(self):
         return [f"{self.split}.pt"]
+
+    @property
+    def label_map(self) -> dict[int, str]:
+        """
+        Returns a mapping of class indices to class names.
+
+        :return: A dictionary mapping class indices to class names.
+        """
+        return self._label_map
 
     @abstractmethod
     def sample_to_graph(self, df) -> Data | HeteroData | None:
@@ -126,7 +141,15 @@ class BaseGraphDataset(InMemoryDataset, ABC):
         if self.pre_transform is not None:
             data_list = [self.pre_transform(data) for data in data_list]
 
-        self.save(data_list, self.processed_paths[0])
+        self._label_map = df.groupby("label_encoded")["family"].first().to_dict()
+        extra_attrs = {
+            "label_map": self._label_map,
+        }
+        data, slices = self.collate(data_list)
+        torch.save(
+            (data.to_dict(), slices, data.__class__, extra_attrs),
+            self.processed_paths[0],
+        )
 
 
 class SunDataset(BaseGraphDataset):

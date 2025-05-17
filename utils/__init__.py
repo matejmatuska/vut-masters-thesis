@@ -80,6 +80,8 @@ def log_conf_matrix(cm, artifact_file):
 
 def log_class_stats(all_preds, all_labels, suffix):
     conf_matrix = confusion_matrix(all_labels, all_preds)
+    mlflow.log_dict({"confusion_matrix": conf_matrix.tolist()}, f"confusion_matrix_{suffix}.json")
+
     log_conf_matrix(conf_matrix, artifact_file=f"confusion_matrix_{suffix}.pdf")
 
     print("\nClassification Report:")

@@ -54,6 +54,7 @@ if __name__ == '__main__':
     print("First train sample:", train_set[2])
     print("First train sample:", train_set[3])
     print("First train sample:", train_set[4])
+    print("Lbael map:", train_set.label_map)
 
     num_classes = train_set.num_classes
     device = torch.device(args.device)
