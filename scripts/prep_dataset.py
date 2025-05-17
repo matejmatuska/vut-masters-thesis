@@ -159,7 +159,7 @@ def train_val_test_split(
     return train_df, val_df, test_df
 
 
-def main(path):
+def main(path, output_dir):
     """
     Prepare the dataset for training.
 
@@ -201,9 +201,16 @@ def main(path):
     # has to be done before stitch_dns to be able to aggregate PPI cols
     df = _parse_ppi(df)
 
-    print("Stitching DNS samples...")
-    df = stitch_dns_uniflows(df)
-    print(f"Samples after stitching: {sample_count(df)}")
+    stitched_path = os.path.join(output_dir, "stitched.parquet")
+    if not os.path.exists(stitched_path):
+        print("Stitching DNS samples...")
+        df = stitch_dns_uniflows(df)
+        # df.to_parquet(stitched_path, index=False)
+    else:
+        print("Loading stitched samples...")
+        df = pd.read_parquet(stitched_path)
+
+    print(f"Stitched samples stitching: {sample_count(df)}")
 
     print("Removing DNS-only samples...")
     df = remove_dns_only_samples(df)
@@ -220,8 +227,8 @@ def main(path):
         print("Empty dataset, nothing to do. Make sure there is enough samples.")
         sys.exit(1)
 
-    df["label_encoded"], _ = pd.factorize(df["family"])
-    print(f'Encoded families: {df.groupby("family")["label_encoded"].first()}')
+    # df["label_encoded"], _ = pd.factorize(df["family"])
+    # print(f'Encoded families: {df.groupby("family")["label_encoded"].first()}')
 
     print("Normalizing dataset...")
     df = normalize(df, per_packet_len=30)
@@ -299,7 +306,7 @@ if __name__ == "__main__":
         print(f"Output directory {output_dir} does not exist.")
         sys.exit(1)
 
-    train, val, test = main(path)
+    train, val, test = main(path, output_dir)
     train.to_parquet(os.path.join(output_dir, "train.parquet"), index=False)
     train.to_csv(os.path.join(output_dir, "train.csv"), index=False)
     val.to_parquet(os.path.join(output_dir, "val.parquet"), index=False)
