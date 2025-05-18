@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch_geometric.nn import MessagePassing, global_max_pool
 from torch_geometric.utils import add_self_loops
 
-TOTAL_PORTS = 65536
+TOTAL_PORTS = 65536  # 2^16
 TCP_FLAGS_VALUES = 256  # 8 bit representation
 
 
@@ -29,12 +29,11 @@ class BaselineClassifier(torch.nn.Module):
         super().__init__()
         tcp_dim = 2
 
-        # self.dst_port_embedding = torch.nn.Embedding(TOTAL_PORTS, port_dim)
+        self.dst_port_embedding = torch.nn.Embedding(TOTAL_PORTS, port_dim)
         tcp_flags_dim = 2
         self.tcp_flags_embedding = torch.nn.Embedding(TCP_FLAGS_VALUES, tcp_flags_dim)
-        # self.tcp_flags_rev_embedding = torch.nn.Embedding(TCP_FLAGS_VALUES, tcp_flags_dim)
 
-        input_dim = edge_dim + tcp_dim
+        input_dim = edge_dim + tcp_dim + port_dim
         # hidden_dim = hidden_dim - port_dim - 2 * tcp_flags_dim
 
         # input_dim = edge_dim + port_dim
@@ -46,7 +45,6 @@ class BaselineClassifier(torch.nn.Module):
             torch.nn.ReLU(),
             torch.nn.Dropout(dropout),
             torch.nn.Linear(hidden_dim, hidden_dim),
-            torch.nn.ReLU(),
         )
         self.gnn_layers = nn.ModuleList(
             [EdgeMPNN(self.edge_mlp, dropout) for _ in range(layers)]
@@ -60,13 +58,13 @@ class BaselineClassifier(torch.nn.Module):
         )
 
     def forward(self, data):
-        # dst_emb = self.dst_port_embedding(data.dst_ports.to(data.y.device))
-        tcp_flags_emb = self.tcp_flags_embedding(data.tcp_flags.to(data.y.device))
+        dst_emb = self.dst_port_embedding(data.dst_ports)
+        tcp_flags_emb = self.tcp_flags_embedding(data.tcp_flags)
         # tcp_flags_rev_emb = self.tcp_flags_rev_embedding(data.tcp_flags_rev.to(data.y.device))
 
         # edge_attr = torch.cat([data.edge_attr, dst_emb, tcp_flags_emb, tcp_flags_rev_emb], dim=1)
         edge_attr = data.edge_attr
-        edge_attr = torch.cat([edge_attr, tcp_flags_emb], dim=1)
+        edge_attr = torch.cat([edge_attr, dst_emb, tcp_flags_emb], dim=1)
 
 
         x = torch.zeros((data.num_nodes, 1)).to(data.y.device)  # dummy node features

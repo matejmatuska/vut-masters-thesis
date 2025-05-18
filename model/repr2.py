@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.nn import HeteroConv, GraphConv, global_max_pool
 
-# TOTAL_PORTS = 65536
+TOTAL_PORTS = 65536  # 2^16
 TCP_FLAGS_VALUES = 256  # 8 bit representation
 
 
@@ -13,17 +13,18 @@ class Repr2Classifier(torch.nn.Module):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.dropout = dropout
+        port_dim = 1
 
-        # self.dst_port_embedding = torch.nn.Embedding(TOTAL_PORTS, port_dim)
+        self.dst_port_embedding = torch.nn.Embedding(TOTAL_PORTS, port_dim)
         tcp_flags_dim = 2
         self.tcp_flags_embedding = torch.nn.Embedding(TCP_FLAGS_VALUES, tcp_flags_dim)
         # self.tcp_flags_rev_embedding = torch.nn.Embedding(TCP_FLAGS_VALUES, tcp_flags_dim)
 
-        flow_dim = flow_dim + tcp_flags_dim
+        flow_dim = flow_dim + tcp_flags_dim + port_dim
 
-        self.host_embedding = torch.nn.Embedding(
-            3000, 8
-        )
+        # self.host_embedding = torch.nn.Embedding(
+        #     3000, 8
+        # )
 
         # self.mlp_head = torch.nn.Sequential(
         #     torch.nn.Linear(flow_dim, hidden_dim),
@@ -58,9 +59,9 @@ class Repr2Classifier(torch.nn.Module):
         )
 
     def forward(self, data):
-        # dst_emb = self.dst_port_embedding(
-        #     #data["NetworkFlow"].dst_ports.to(data.y.device)
-        # )
+        dst_emb = self.dst_port_embedding(
+            data["NetworkFlow"].dst_ports.to(data.y.device)
+        )
         tcp_flags_emb = self.tcp_flags_embedding(
             data["NetworkFlow"].tcp_flags.to(data.y.device)
         )
@@ -72,7 +73,7 @@ class Repr2Classifier(torch.nn.Module):
         x_host = torch.zeros((data["Host"].num_nodes, 8)).to(data.y.device)
         x_flow = data["NetworkFlow"].x
         x_flow = torch.cat(
-            [x_flow, tcp_flags_emb], dim=1
+            [x_flow, dst_emb, tcp_flags_emb], dim=1
         )
         #x_flow = self.mlp_head(x_flow)
 

@@ -16,6 +16,8 @@ SCALAR_ATTRIBUTES = [
     "BYTES",
     "BYTES_REV",
     "DURATION",
+    "packets_per_second",
+    "direction_switches",
 ]
 PROTO_ONE_HOT = [
     "PROTO_TCP",
@@ -258,7 +260,7 @@ class Repr1Dataset(BaseGraphDataset):
             # just some unique key for nodes, required for networkx NOT used as a feature
             return f"{row['SRC_IP']}:{row['SRC_PORT']}\n{row['DST_IP']}:{row['DST_PORT']}-{row['TIME_FIRST']}"
 
-        G = nx.DiGraph()
+        G = nx.Graph()
         # first make the forward edges
         df = df.sort_values(by="TIME_FIRST", ascending=True).reset_index(drop=True)
 
@@ -372,8 +374,8 @@ class Repr2Dataset(BaseGraphDataset):
             current_flow_id += 1
 
         for i in range(current_flow_id - 2):
-            edges_flow_to_flow[0] += [i, i + 1]
-            edges_flow_to_flow[1] += [i + 1, i]
+            edges_flow_to_flow[0] += [i]
+            edges_flow_to_flow[1] += [i + 1]
 
         data = HeteroData()
         data["NetworkFlow"].x = torch.tensor(flow_attrs, dtype=torch.float)
