@@ -71,11 +71,24 @@ os.makedirs(model_dir, exist_ok=True)
 
 
 def objective(trial: optuna.Trial) -> float:
-    learning_rate = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
-    hidden_dim = trial.suggest_int("hidden_dim", 96, 256, step=32)
-    num_layers = trial.suggest_int("num_layers", 1, 2)
-    dropout = trial.suggest_float("dropout", 0.05, 0.4)
-    weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True)
+    if args.model == "baseline":
+        learning_rate = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
+        hidden_dim = trial.suggest_int("hidden_dim", 96, 256, step=32)
+        num_layers = trial.suggest_int("num_layers", 1, 2)
+        dropout = trial.suggest_float("dropout", 0.1, 0.4)
+        weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True)
+    elif args.model == "repr1":
+        learning_rate = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
+        hidden_dim = trial.suggest_int("hidden_dim", 96, 256, step=32)
+        num_layers = trial.suggest_int("num_layers", 2, 4)
+        dropout = trial.suggest_float("dropout", 0.05, 0.3)
+        weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True)
+    elif args.model == "repr2":
+        learning_rate = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
+        hidden_dim = trial.suggest_int("hidden_dim", 96, 256, step=32)
+        num_layers = trial.suggest_int("num_layers", 2, 4)
+        dropout = trial.suggest_float("dropout", 0.1, 0.4)
+        weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True)
 
     model = model_factory(
         train_set,

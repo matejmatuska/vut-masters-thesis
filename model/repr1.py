@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch_geometric.nn import GraphConv, global_max_pool
 
 TOTAL_PORTS = 65536
-# TCP_FLAGS_VALUES = 256  # 8 bit representation
+TCP_FLAGS_VALUES = 256  # 8 bit representation
 
 
 class Repr1Classifier(torch.nn.Module):
@@ -11,13 +11,13 @@ class Repr1Classifier(torch.nn.Module):
         super().__init__()
         self.dropout = dropout
 
-        self.dst_port_embedding = torch.nn.Embedding(TOTAL_PORTS, port_dim)
-        # tcp_flags_dim = 2
-        # self.tcp_flags_embedding = torch.nn.Embedding(TCP_FLAGS_VALUES, tcp_flags_dim)
+        # self.dst_port_embedding = torch.nn.Embedding(TOTAL_PORTS, port_dim)
+        tcp_flags_dim = 2
+        self.tcp_flags_embedding = torch.nn.Embedding(TCP_FLAGS_VALUES, tcp_flags_dim)
         # self.tcp_flags_rev_embedding = torch.nn.Embedding(TCP_FLAGS_VALUES, tcp_flags_dim)
 
-        hidden_dim = hidden_dim - port_dim
-        input_dim = input_dim + port_dim
+        # hidden_dim = hidden_dim - port_dim
+        input_dim = input_dim + tcp_flags_dim
 
         self.convs = torch.nn.ModuleList()
         self.convs.append(GraphConv(input_dim, hidden_dim))
@@ -36,12 +36,12 @@ class Repr1Classifier(torch.nn.Module):
         )
 
     def forward(self, data):
-        dst_emb = self.dst_port_embedding(data.dst_ports.to(data.x.device))
-        # tcp_flags_emb = self.tcp_flags_embedding(data.tcp_flags.to(data.x.device))
+        # dst_emb = self.dst_port_embedding(data.dst_ports.to(data.x.device))
+        tcp_flags_emb = self.tcp_flags_embedding(data.tcp_flags.to(data.x.device))
         # tcp_flags_rev_emb = self.tcp_flags_rev_embedding(data.tcp_flags_rev.to(data.x.device))
 
         # x = torch.cat([data.x.float(), dst_emb, tcp_flags_emb, tcp_flags_rev_emb], dim=1)
-        x = torch.cat([data.x.float(), dst_emb], dim=1)
+        x = torch.cat([data.x.float(), tcp_flags_emb], dim=1)
 
         # x = data.x.float()
         for conv in self.convs:
