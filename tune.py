@@ -73,8 +73,8 @@ os.makedirs(model_dir, exist_ok=True)
 def objective(trial: optuna.Trial) -> float:
     learning_rate = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
     hidden_dim = trial.suggest_int("hidden_dim", 96, 256, step=32)
-    num_layers = trial.suggest_int("num_layers", 2, 4)
-    dropout = trial.suggest_float("dropout", 0.2, 0.3)
+    num_layers = trial.suggest_int("num_layers", 1, 2)
+    dropout = trial.suggest_float("dropout", 0.05, 0.4)
     weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True)
 
     model = model_factory(
@@ -132,12 +132,34 @@ def objective(trial: optuna.Trial) -> float:
             log(Epoch=epoch, Loss=train_loss, Val=val_loss, Acc=val_acc, F1=val_f1)
             times.append(time.time() - start)
 
-            if early_stopping(val_loss, model, val_f1=val_f1, epoch=epoch):
+            if early_stopping(val_loss, model, val_f1=val_f1, epoch=epoch,
+                    all_preds=all_preds,
+                    all_labels=all_labels,
+                    val_loss=val_loss,
+                    val_acc=val_acc,
+                    train_loss=train_loss,
+                    ):
                 print(f"Early stopping at epoch {epoch} with min val_loss: {early_stopping.best_loss}")
+                mlflow.log_metric('reached_epoch', epoch)
                 break
+
+        if early_stopping:
+            all_preds = early_stopping.data_at_best['all_preds']
+            all_labels = early_stopping.data_at_best['all_labels']
+            val_loss = early_stopping.data_at_best['val_loss']
+            val_acc = early_stopping.data_at_best['val_acc']
+            train_loss = early_stopping.data_at_best['val_loss']
+            utils.log_class_stats(all_preds, all_labels, suffix="val")
 
         # only log confusion matrix and classification report after the last epoch
         utils.log_class_stats(all_preds, all_labels, suffix="val")
+
+        mlflow.log_metrics({
+            'real_train_loss': train_loss,
+            'real_val_loss': val_loss,
+            'real_accuracy': val_acc,
+            'real_f1': val_f1
+        }, step=epoch)
 
         mlflow.log_metric('median_epoch_time', torch.tensor(times).median())
 
@@ -146,6 +168,8 @@ def objective(trial: optuna.Trial) -> float:
         torch.save(model_state, model_path)
         trial.set_user_attr("model_path", model_path)
 
+    retf1 = early_stopping.data_at_best['val_f1'] if early_stopping else val_f1
+    print(f'objective returning with val_f1 {retf1}')
     return early_stopping.data_at_best['val_f1'] if early_stopping else val_f1
 
 

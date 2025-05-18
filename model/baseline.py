@@ -69,7 +69,7 @@ class BaselineClassifier(torch.nn.Module):
         # edge_attr = torch.cat([data.edge_attr, dst_emb, tcp_flags_emb, tcp_flags_rev_emb], dim=1)
         edge_attr = torch.cat([data.edge_attr, dst_emb], dim=1)
 
-        x = torch.zeros((data.num_nodes, 1))  # dummy node features
+        x = torch.zeros((data.num_nodes, 1)).to(data.y.device)  # dummy node features
         for layer in self.gnn_layers:
             x = layer(x, data.edge_index, edge_attr)
 

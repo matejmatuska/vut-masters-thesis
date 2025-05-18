@@ -30,6 +30,7 @@ class EarlyStopping:
     def __call__(self, current_loss, model, **kwargs) -> bool:
         assert not self.stop, "Early stopping has been triggered already."
         if current_loss < self.best_loss + self.tolerance:
+            print('best loss')
             if current_loss < self.best_loss:
                 self.best_loss = current_loss
                 self._data_at_best = kwargs
