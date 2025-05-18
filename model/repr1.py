@@ -25,13 +25,13 @@ class Repr1Classifier(torch.nn.Module):
         self.convs.append(GraphConv(hidden_dim, hidden_dim))
 
         self.fc = torch.nn.Sequential(
-            torch.nn.Linear(hidden_dim, hidden_dim),
+            torch.nn.Linear(hidden_dim, hidden_dim // 2),
             torch.nn.ReLU(),
             torch.nn.Dropout(self.dropout),
-            torch.nn.Linear(hidden_dim, hidden_dim),
+            torch.nn.Linear(hidden_dim // 2, hidden_dim // 4),
             torch.nn.ReLU(),
             torch.nn.Dropout(self.dropout),
-            torch.nn.Linear(hidden_dim, num_classes),
+            torch.nn.Linear(hidden_dim // 4, num_classes),
         )
 
     def forward(self, data):

@@ -1,10 +1,8 @@
 import os
 from abc import ABC, abstractmethod
-from collections import defaultdict
 # from typing import override
 
 import networkx as nx
-import numpy as np
 import pandas as pd
 import torch
 from torch_geometric.data import Data, HeteroData, InMemoryDataset
@@ -18,6 +16,10 @@ SCALAR_ATTRIBUTES = [
     "DURATION",
     "packets_per_second",
     "direction_switches",
+    "q1_len",
+    "q2_len",
+    "fwd_bytes",
+    "fwd_bwd_ratio",
 ]
 PROTO_ONE_HOT = [
     "PROTO_TCP",
