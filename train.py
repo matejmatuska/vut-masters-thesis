@@ -109,12 +109,30 @@ if __name__ == '__main__':
             log(Epoch=epoch, Loss=train_loss, Val=val_loss, Acc=val_acc, F1=val_f1)
             times.append(time.time() - start)
 
-            if early_stopping(val_loss, model, val_f1=val_f1):
+            if early_stopping(
+                val_loss,
+                model,
+                val_f1=val_f1,
+                epoch=epoch,
+                all_preds=all_preds,
+                all_labels=all_labels,
+                val_loss=val_loss,
+                val_acc=val_acc,
+                train_loss=train_loss,
+            ):
                 print(f"Early stopping at epoch {epoch} with min val_loss: {early_stopping.best_loss:.4f}")
                 break
 
         mlflow.log_metric('median_epoch_time', torch.tensor(times).median())
-        utils.log_class_stats(all_preds, all_labels, suffix="val")
+        if early_stopping:
+            all_preds = early_stopping.data_at_best['all_preds']
+            all_labels = early_stopping.data_at_best['all_labels']
+            val_loss = early_stopping.data_at_best['val_loss']
+            val_acc = early_stopping.data_at_best['val_acc']
+            train_loss = early_stopping.data_at_best['val_loss']
+            utils.log_class_stats(all_preds, all_labels, suffix="val")
+        else:
+            utils.log_class_stats(all_preds, all_labels, suffix="val")
 
         # Evaluate on the test set
         model.load_state_dict(early_stopping.best_model_state)

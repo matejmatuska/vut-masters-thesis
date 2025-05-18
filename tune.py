@@ -145,13 +145,17 @@ def objective(trial: optuna.Trial) -> float:
             log(Epoch=epoch, Loss=train_loss, Val=val_loss, Acc=val_acc, F1=val_f1)
             times.append(time.time() - start)
 
-            if early_stopping(val_loss, model, val_f1=val_f1, epoch=epoch,
-                    all_preds=all_preds,
-                    all_labels=all_labels,
-                    val_loss=val_loss,
-                    val_acc=val_acc,
-                    train_loss=train_loss,
-                    ):
+            if early_stopping(
+                val_loss,
+                model,
+                val_f1=val_f1,
+                epoch=epoch,
+                all_preds=all_preds,
+                all_labels=all_labels,
+                val_loss=val_loss,
+                val_acc=val_acc,
+                train_loss=train_loss,
+            ):
                 print(f"Early stopping at epoch {epoch} with min val_loss: {early_stopping.best_loss}")
                 mlflow.log_metric('reached_epoch', epoch)
                 break
@@ -163,9 +167,9 @@ def objective(trial: optuna.Trial) -> float:
             val_acc = early_stopping.data_at_best['val_acc']
             train_loss = early_stopping.data_at_best['val_loss']
             utils.log_class_stats(all_preds, all_labels, suffix="val")
-
-        # only log confusion matrix and classification report after the last epoch
-        utils.log_class_stats(all_preds, all_labels, suffix="val")
+        else:
+            # only log confusion matrix and classification report after the last epoch
+            utils.log_class_stats(all_preds, all_labels, suffix="val")
 
         mlflow.log_metrics({
             'real_train_loss': train_loss,
