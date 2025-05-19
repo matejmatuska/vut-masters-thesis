@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from torch_geometric.nn import HeteroConv, GraphConv, global_max_pool
+from torch_geometric.nn import HeteroConv, SAGEConv, global_max_pool
 
 TOTAL_PORTS = 65536  # 2^16
 TCP_FLAGS_VALUES = 256  # 8 bit representation
@@ -36,16 +36,16 @@ class Repr2Classifier(torch.nn.Module):
 
         self.convs = torch.nn.ModuleList()
         self.convs.append(HeteroConv({
-            ('Host', 'communicates', 'NetworkFlow'): GraphConv((8, flow_dim), hidden_dim),
-            ('NetworkFlow', 'communicates', 'Host'): GraphConv((flow_dim, 8), hidden_dim),
-            ('NetworkFlow', 'related', 'NetworkFlow'): GraphConv(flow_dim, hidden_dim),
+            ('Host', 'communicates', 'NetworkFlow'): SAGEConv((8, flow_dim), hidden_dim),
+            ('NetworkFlow', 'communicates', 'Host'): SAGEConv((flow_dim, 8), hidden_dim),
+            ('NetworkFlow', 'related', 'NetworkFlow'): SAGEConv(flow_dim, hidden_dim),
         }, aggr='sum'))
 
         for i in range(layers - 1):
             self.convs.append(HeteroConv({
-                ('Host', 'communicates', 'NetworkFlow'): GraphConv(hidden_dim, hidden_dim),
-                ('NetworkFlow', 'communicates', 'Host'): GraphConv(hidden_dim, hidden_dim),
-                ('NetworkFlow', 'related', 'NetworkFlow'): GraphConv(hidden_dim, hidden_dim),
+                ('Host', 'communicates', 'NetworkFlow'): SAGEConv(hidden_dim, hidden_dim),
+                ('NetworkFlow', 'communicates', 'Host'): SAGEConv(hidden_dim, hidden_dim),
+                ('NetworkFlow', 'related', 'NetworkFlow'): SAGEConv(hidden_dim, hidden_dim),
             }, aggr='sum'))
 
         self.classifier = torch.nn.Sequential(
