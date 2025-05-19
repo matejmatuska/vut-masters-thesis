@@ -1,21 +1,24 @@
 import os
 import sys
-from ast import literal_eval
 
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-
-import stitch_dns
+from ast import literal_eval
 
 DATE_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
+
 PPI_PAD_LEN = 30
-VAL_SIZE = 0.15
-TEST_SIZE = 0.15
+VAL_SIZE = 0.2
+TEST_SIZE = 0.1
 
 TOO_FEW_SAMPLES = 500
 TOO_MANY_SAMPLES = 2000
+
+
+def print_flows_and_samples(df):
+    print(f"Samples {len(df["sample"].unique())}, Flows {len(df)}")
 
 
 def sample_count(df):
@@ -23,19 +26,13 @@ def sample_count(df):
 
 
 def _parse_ppi(df):
-    """
-    Parse the per-packet information (PPI) fields into Python lists.
-    """
-    df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].str.replace("|", ",")
     df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].apply(literal_eval)
-
-    df["PPI_PKT_DIRECTIONS"] = df["PPI_PKT_DIRECTIONS"].str.replace("|", ",")
     df["PPI_PKT_DIRECTIONS"] = df["PPI_PKT_DIRECTIONS"].apply(literal_eval)
 
-    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].str[1:-1].str.split("|")
+    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(literal_eval)
     df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(pd.to_datetime, format=DATE_FORMAT)
-    return df
 
+    return df
 
 def cap_samples_per_fam(df, min_samples, max_samples) -> pd.DataFrame:
     """
@@ -64,35 +61,7 @@ def cap_samples_per_fam(df, min_samples, max_samples) -> pd.DataFrame:
     return df_enough.merge(has_more, on=["family", "sample"])
 
 
-def stitch_dns_uniflows(df) -> pd.DataFrame:
-    """
-    Stitches DNS uniflows back into biflows.
-    """
-    print("Stitched DNS:")
-    dns = df[df["DNS_NAME"].notna()]
-    nondns = df[df["DNS_NAME"].isna()]
-    dns = stitch_dns.stitch_dns(dns).reset_index()
-    return pd.concat([dns, nondns])
-
-
-def remove_extreme_packet_count_samples(df, min=4, max=1e6) -> pd.DataFrame:
-    """
-    Remove samples outside the specified packet count range.
-    """
-    group_sums = df.groupby("sample")[["PACKETS", "PACKETS_REV"]].transform("sum")
-    return df[(group_sums.sum(axis=1) > min) & (group_sums.sum(axis=1) < max)]
-
-
-def remove_dns_only_samples(df) -> pd.DataFrame:
-    """
-    Filter out samples with only DNS packets.
-    """
-    df["is_dns"] = df["DNS_NAME"].notna()
-    dns_only = df.groupby(["family", "sample"])["is_dns"].transform("all")
-    return df[~dns_only]
-
-
-def normalize_all(df, per_packet_len=30) -> pd.DataFrame:
+def normalize_all(df, per_packet_len=25) -> pd.DataFrame:
     """
     Normalize the dataset.
     - log1p + std transform on PACKETS, PACKETS_REV, BYTES, BYTES_REV
@@ -111,7 +80,7 @@ def normalize_all(df, per_packet_len=30) -> pd.DataFrame:
 
     def times_to_relative(timestamps):
         base = timestamps[0]
-        relative_times = [(ts - base).total_seconds() for ts in timestamps]
+        relative_times = [(ts - base) for ts in timestamps]
         # Exclude the first timestamp since it's always 0 - can use 0 for padding
         return relative_times[1:]
 
@@ -123,14 +92,97 @@ def normalize_all(df, per_packet_len=30) -> pd.DataFrame:
         return np.pad(lst, (0, pad_width), "constant", constant_values=value)
 
     # Ensure fixed-length arrays (padding or truncating to 30)
-    for col in ["PPI_PKT_TIMES", "PPI_PKT_LENGTHS", "PPI_PKT_DIRECTIONS"]:
-        df[col] = df[col].apply(pad_or_truncate, args=(per_packet_len, 0))
-
+    df['PPI_PKT_TIMES'] = df['PPI_PKT_TIMES'].apply(pad_or_truncate, args=(25, 0))
+    df['PPI_PKT_DIRECTIONS'] = df['PPI_PKT_DIRECTIONS'].apply(pad_or_truncate, args=(25, 0))
+    df['PPI_PKT_LENGTHS'] = df['PPI_PKT_LENGTHS'].apply(pad_or_truncate, args=(25, 0))
     return df
 
 
+def extract_flow_features(row):
+    lens = np.array(row['PPI_PKT_LENGTHS'])
+    times = np.array(row['PPI_PKT_TIMES'])
+    dirs = np.array(row['PPI_PKT_DIRECTIONS'])
+
+    # Basic stats
+    min_len = lens.min()
+    max_len = lens.max()
+    mean_len = lens.mean()
+    std_len = lens.std()
+    q1_len = np.percentile(lens, 25)
+    q2_len = np.percentile(lens, 50)
+    q3_len = np.percentile(lens, 75)
+    range_len = max_len - min_len
+    # skew_len = skew(lens)
+    # kurt_len = kurtosis(lens)
+
+    fwd_mask = dirs == 1
+    bwd_mask = dirs == -1
+    num_fwd = fwd_mask.sum()
+    num_bwd = bwd_mask.sum()
+    fwd_bytes = lens[fwd_mask].sum() if num_fwd > 0 else 0
+    bwd_bytes = lens[bwd_mask].sum() if num_bwd > 0 else 0
+    fwd_bwd_ratio = fwd_bytes / (bwd_bytes + 1e-6)
+    mean_fwd_len = lens[fwd_mask].mean() if num_fwd > 0 else 0
+    mean_bwd_len = lens[bwd_mask].mean() if num_bwd > 0 else 0
+    direction_switches = np.sum(np.diff(dirs) != 0)
+
+    if len(times) >= 2:
+        iats = np.diff(times)
+        mean_iat = iats.mean()
+        std_iat = iats.std()
+        min_iat = iats.min()
+        max_iat = iats.max()
+        q1_iat = np.percentile(iats, 25)
+        q2_iat = np.percentile(iats, 50)
+        q3_iat = np.percentile(iats, 75)
+        duration = times[-1] - times[0]
+        packets_per_second = len(times) / (duration + 1e-6)
+    else:
+        mean_iat = std_iat = min_iat = max_iat = q1_iat = q2_iat = q3_iat = duration = packets_per_second = 0
+
+    return pd.Series(
+        {
+            "min_len": min_len,
+           "max_len": max_len,
+            "mean_len": mean_len,
+            "std_len": std_len,
+            "q1_len": q1_len,
+            "q2_len": q2_len,
+            "q3_len": q3_len,
+            "range_len": range_len,
+            "num_fwd": num_fwd,
+            "num_bwd": num_bwd,
+            "fwd_bytes": fwd_bytes,
+            "bwd_bytes": bwd_bytes,
+            "fwd_bwd_ratio": fwd_bwd_ratio,
+            "mean_fwd_len": mean_fwd_len,
+            "mean_bwd_len": mean_bwd_len,
+            "direction_switches": direction_switches,
+            "mean_iat": mean_iat,
+            "min_iat": min_iat,
+            "max_iat": max_iat,
+            "q1_iat": q1_iat,
+            "q2_iat": q2_iat,
+            "q3_iat": q3_iat,
+            "std_iat": std_iat,
+            "packets_per_second": packets_per_second,
+        }
+    )
+
+
+def new_features(df):
+    new_feats_cols = None
+    new_feats_df = df.apply(extract_flow_features, axis=1)
+
+    if new_feats_cols is None:
+        new_feats_cols = new_feats_df.columns.tolist()
+
+    df = pd.concat([df, new_feats_df], axis=1)
+    return df, new_feats_cols
+
+
 def normalize_splits(
-    df_train, df_val, df_test
+    df_train, df_val, df_test, new_feats_cols
 ) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
     """
     Normalize the train, validation, and test splits.
@@ -148,7 +200,13 @@ def normalize_splits(
     """
     df_train, df_val, df_test = df_train.copy(), df_val.copy(), df_test.copy()
 
-    scalars = ["PACKETS", "PACKETS_REV", "BYTES", "BYTES_REV", "DURATION"]
+    scalars = [
+        "PACKETS",
+        "PACKETS_REV",
+        "BYTES",
+        "BYTES_REV",
+        "DURATION",
+    ] + new_feats_cols
 
     for col in scalars:
         df_train[col] = np.log1p(df_train[col])
@@ -182,43 +240,6 @@ def normalize_splits(
     df_val = one_hot_encode_protocol(df_val)
     df_test = one_hot_encode_protocol(df_test)
 
-    def bin_port(port):
-        # common ports get separate bin
-        if port in [
-            0, # NULL
-            137, # NetBIOS
-            138, # NetBIOS
-            139, # NetBIOS
-            20, # FTP command
-            21, # FTP data
-            22, # SSH
-            23, # Telnet
-            25, # SMTP
-            110, # POP3
-            143, # IMAP
-            443, # HTTPS
-            445, # SMB
-            53, # DNS
-            53, # DNS
-            80, # HTTP
-            587, # Email submission
-            1433, # MS SQL
-            3306, # MySQL
-            3389, # RDP
-            8080, # HTTP alternate
-            9001, # Tor
-        ]:
-            return str(port)
-        elif port < 1024:
-            return "standard"
-        elif port < 49152:
-            return "non-standard"
-        else:
-            return "dynamic"
-
-    # df["SRC_PORT_BIN"] = df["SRC_PORT"].apply(bin_port)
-    # df["DST_PORT_BIN"] = df["DST_PORT"].apply(bin_port)
-
     scaler = StandardScaler()
     for col in ["PPI_PKT_LENGTHS", "PPI_PKT_TIMES"]:
         df_train[col] = list(
@@ -230,83 +251,51 @@ def normalize_splits(
     df_train["DURATION"] = df_train["DURATION"].fillna(0)
     df_val["DURATION"] = df_val["DURATION"].fillna(0)
     df_test["DURATION"] = df_test["DURATION"].fillna(0)
+
+    df_train["min_iat"] = df_train["min_iat"].fillna(0)
+    df_train["q1_iat"] = df_train["q1_iat"].fillna(0)
+    df_val["q2_iat"] = df_val["q2_iat"].fillna(0)
+    df_test["q3_iat"] = df_test["q3_iat"].fillna(0)
     return df_train, df_val, df_test
 
 
 def train_val_test_split(
-    df, val_size, test_size, random_state=42
+    df, val_size, test_size, random_state=83
 ) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
     """
     Split the dataset into train, validation, and test sets in a stratified manner.
     """
-    # Get unique samples and their family labels
-    sample_df = df[["sample", "family"]].drop_duplicates()
+    sample_sizes = df.groupby('sample').size().rename('sample_size')
+    sample_families = df[['sample', 'family']].drop_duplicates().set_index('sample')
 
-    # First split: train and temp (val + test)
+    sample_df = sample_families.join(sample_sizes)
+
+    sample_df['size_bin'] = pd.qcut(sample_df['sample_size'], q=5, duplicates='drop')
+
+    # stratify by key and size bin
+    sample_df['stratify_key'] = sample_df['family'].astype(str) + "__" + sample_df['size_bin'].astype(str)
+
     train_samples, temp_samples = train_test_split(
         sample_df,
         test_size=val_size + test_size,
-        stratify=sample_df["family"],
-        random_state=random_state,
+        stratify=sample_df['stratify_key'],
+        random_state=random_state
     )
-
-    # Second split: validation and test from temp
     val_samples, test_samples = train_test_split(
         temp_samples,
         test_size=test_size / (val_size + test_size),
-        stratify=temp_samples["family"],
-        random_state=random_state,
+        stratify=temp_samples['stratify_key'],
+        random_state=random_state
     )
 
-    # Map back to full DataFrame
-    train_df = df[df["sample"].isin(train_samples["sample"])]
-    val_df = df[df["sample"].isin(val_samples["sample"])]
-    test_df = df[df["sample"].isin(test_samples["sample"])]
+    train_df = df[df['sample'].isin(train_samples.index)]
+    val_df = df[df['sample'].isin(val_samples.index)]
+    test_df = df[df['sample'].isin(test_samples.index)]
 
     return train_df, val_df, test_df
 
 
-def clean(df):
-    print("Removing extreme packet count samples...")
-    df = remove_extreme_packet_count_samples(df, min=4, max=1e6)
-    print(f"Samples after removing extreme packet counts: {sample_count(df)}")
-
-    # these are the cols that stitch_dns uses and can aggr right now
-    keep_cols = (
-        stitch_dns.STITCH_COLS
-        + stitch_dns.FLOW_TUPLE_COLS
-        + list(stitch_dns.COL_AGG_FUNCS.keys())
-    )
-    df = df[keep_cols]
-    # has to be done before stitch_dns to be able to aggregate PPI cols
-    df = _parse_ppi(df)
-    df["TIME_FIRST"] = pd.to_datetime(df["TIME_FIRST"], format=DATE_FORMAT)
-    df["TIME_LAST"] = pd.to_datetime(df["TIME_LAST"], format=DATE_FORMAT)
-    df["DURATION"] = (df["TIME_LAST"] - df["TIME_FIRST"]).dt.total_seconds()
-
-    print("Stitching DNS samples...")
-    df = stitch_dns_uniflows(df)
-    print(f"Stitched samples stitching: {sample_count(df)}")
-
-    print("Removing DNS-only samples...")
-    df = remove_dns_only_samples(df)
-    print(f"Samples after removing DNS-only: {sample_count(df)}")
-
-    print("Capping samples per family...")
-    # WARN: there is no check if there are enough samples
-    df = cap_samples_per_fam(df, TOO_FEW_SAMPLES, TOO_MANY_SAMPLES)
-    print(df[["family", "sample"]].drop_duplicates()["family"].value_counts())
-    print(df[["family", "sample"]].drop_duplicates()["family"].value_counts().sum())
-    print(f"Samples after capping: {sample_count(df)}")
-
-    print("Normalizing dataset")
-    df = normalize_all(df, per_packet_len=PPI_PAD_LEN)
-    print("Normalizing done:")
-    print(df.head())
-    return df
-
-
-def prepare_features(df) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
+def prepare_features(df, new_feats_cols) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
     print("Splitting dataset...")
     train, val, test = train_val_test_split(df, VAL_SIZE, TEST_SIZE)
     print(
@@ -314,10 +303,9 @@ def prepare_features(df) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
     )
 
     print("Normalizing and scaling dataset...")
-    train, val, test = normalize_splits(train, val, test)
+    train, val, test = normalize_splits(train, val, test, new_feats_cols)
     print("Normalization and scaling done:")
     print(train.head())
-
     return train, val, test
 
 
@@ -336,36 +324,45 @@ if __name__ == "__main__":
         print(f"Output directory {output_dir} does not exist.")
         sys.exit(1)
 
-    ready_path = os.path.join(output_dir, "dataset-ready.parquet")
-    if os.path.exists(ready_path):
-        print(f"Clean dataset found at {ready_path}, loading - skipping cleaning.")
-        df = pd.read_parquet(ready_path)
-    else:
-        print("Loading dataset...")
-        df = pd.read_csv(path)
-        print(f"Loaded {sample_count(df)} samples")
-
-        print("Cleaning dataset...")
-        df = clean(df)
-        print(f"Storing cleaned dataset to {ready_path}...")
-        df.to_parquet(ready_path, index=False)
+    print(f"Loading dataset from {path}...")
+    df = pd.read_parquet(path)
 
     if len(df) == 0:
         print("Empty dataset, nothing to do. Make sure there is enough samples.")
         sys.exit(1)
 
-    train, val, test = prepare_features(df)
+    print(df['PPI_PKT_TIMES'].head())
+
+    print("Capping samples per family...")
+    # WARN: there is no check if there are enough samples
+    df = cap_samples_per_fam(df, TOO_FEW_SAMPLES, TOO_MANY_SAMPLES)
+    print(df[["family", "sample"]].drop_duplicates()["family"].value_counts())
+    print(df[["family", "sample"]].drop_duplicates()["family"].value_counts().sum())
+    print(f"Samples after capping: {sample_count(df)}")
+    print_flows_and_samples(df)
+
+    print("Adding new features...")
+    df, new_feats_cols = new_features(df)
+
+    print("Normalizing dataset")
+    df = normalize_all(df, per_packet_len=PPI_PAD_LEN)
+    print("Normalizing done:")
+    print(df.head())
+    new_feats_path = os.path.join(output_dir, "dataset-all-feats.parquet")
+    df.to_parquet(new_feats_path, index=False)
+
+    train, val, test = prepare_features(df, new_feats_cols)
 
     print(
         f"Storing train dataset to {output_dir}/train.parquet and {output_dir}/train.csv..."
     )
     train.to_parquet(os.path.join(output_dir, "train.parquet"), index=False)
-    train.to_csv(os.path.join(output_dir, "train.csv"), index=False)
+    # train.to_csv(os.path.join(output_dir, "train.csv"), index=False)
     print(
         f"Storing val dataset to {output_dir}/val.parquet and {output_dir}/val.csv..."
     )
     val.to_parquet(os.path.join(output_dir, "val.parquet"), index=False)
-    val.to_csv(os.path.join(output_dir, "val.csv"), index=False)
+    # val.to_csv(os.path.join(output_dir, "val.csv"), index=False)
     print(
         f"Storing test dataset to {output_dir}/test.parquet and {output_dir}/test.csv..."
     )

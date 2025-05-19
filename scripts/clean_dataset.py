@@ -1,9 +1,36 @@
 import os
 import sys
+from ast import literal_eval
 
 import pandas as pd
 
+import stitch_dns
+
+DATE_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
 _DNS_PTR_QTYPE = 12
+
+
+def sample_count(df):
+    return len(df["sample"].unique())
+
+
+def print_flows_and_samples(df):
+    print(f"Samples {len(df["sample"].unique())}, Flows {len(df)}")
+
+
+def _parse_ppi(df):
+    """
+    Parse the per-packet information (PPI) fields into Python lists.
+    """
+    df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].str.replace("|", ",")
+    df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].apply(literal_eval)
+
+    df["PPI_PKT_DIRECTIONS"] = df["PPI_PKT_DIRECTIONS"].str.replace("|", ",")
+    df["PPI_PKT_DIRECTIONS"] = df["PPI_PKT_DIRECTIONS"].apply(literal_eval)
+
+    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].str[1:-1].str.split("|")
+    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(pd.to_datetime, format=DATE_FORMAT)
+    return df
 
 
 def load_csvs_dataset(path) -> pd.DataFrame:
@@ -84,12 +111,14 @@ def get_common_ips(df) -> pd.Series:
     ]
     print(f"Removed {before - len(unique_dst_ips)} host IPs")
 
+    unique_dst_ips.to_csv('uniq_dst_ips.v3.csv', index=False)
     result = (
         unique_dst_ips.reset_index().groupby("DST_IP")["family"].nunique().reset_index()
     )
     result = result[result["family"] > 1]
     print(result["DST_IP"])
-    # result.to_csv('uniq_dst_ips.v2.csv', index=False)
+    result.to_csv('uniq_dst_ips.v2.csv', index=False)
+    return result[["DST_IP"]].drop_duplicates()
 
 
 def filter_common_ips(df, common_ips) -> pd.DataFrame:
@@ -100,6 +129,7 @@ def filter_common_ips(df, common_ips) -> pd.DataFrame:
     :return: the filtered dataset
     :rtype: pd.DataFrame
     """
+    print(f"Filtering with {common_ips} common IPs")
     return df[
         (~df["DST_IP"].isin(set(common_ips))) & (~df["SRC_IP"].isin(set(common_ips)))
     ]
@@ -215,7 +245,7 @@ def filter_rDNS(df) -> (pd.DataFrame, pd.DataFrame):
     index = (df["DNS_QTYPE"] == _DNS_PTR_QTYPE) & (
         df["DNS_NAME"].isin(set(common_names[common_names > 1].index))
     )
-    return (df[~index], d[index])
+    return (df[~index].copy(), df[index].copy())
 
 
 def run(dset_path, output_dir) -> pd.DataFrame:
@@ -223,7 +253,7 @@ def run(dset_path, output_dir) -> pd.DataFrame:
     top1m_path = os.path.join("data", "top-1m.csv")  # TODO find some place for this
     common_ips_path = os.path.join(
         "data", "filter_common_ips.csv"
-    )  # TODO find some place for this
+    )
 
     # outputs
     top1m_mod_path = os.path.join(output_dir, "domains-to-remove.csv")
@@ -238,7 +268,8 @@ def run(dset_path, output_dir) -> pd.DataFrame:
 
     print("Filtering common IPs")
     if True:  # TODO: this should be computed!!!
-        common_ips = pd.read_csv(common_ips_path)
+        # common_ips = pd.read_csv('uniq_dst_ips.v2.csv')
+        common_ips = pd.read_csv(os.path.join("data", "filter_common_ips.csv"))
     else:
         common_ips = get_common_ips(df)
         # common_ips.to_csv(common_ips_path, index=False)
@@ -264,6 +295,34 @@ def run(dset_path, output_dir) -> pd.DataFrame:
     return df
 
 
+def stitch_dns_uniflows(df) -> pd.DataFrame:
+    """
+    Stitches DNS uniflows back into biflows.
+    """
+    print("Stitched DNS:")
+    dns = df[df["DNS_NAME"].notna()]
+    nondns = df[df["DNS_NAME"].isna()]
+    dns = stitch_dns.stitch_dns(dns).reset_index()
+    return pd.concat([dns, nondns])
+
+
+def remove_extreme_packet_count_samples(df, min=4, max=1e6) -> pd.DataFrame:
+    """
+    Remove samples outside the specified packet count range.
+    """
+    group_sums = df.groupby("sample")[["PACKETS", "PACKETS_REV"]].transform("sum")
+    return df[(group_sums.sum(axis=1) > min) & (group_sums.sum(axis=1) < max)]
+
+
+def remove_dns_only_samples(df) -> pd.DataFrame:
+    """
+    Filter out samples with only DNS packets.
+    """
+    df["is_dns"] = df["DNS_NAME"].notna()
+    dns_only = df.groupby(["family", "sample"])["is_dns"].transform("all")
+    return df[~dns_only]
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: python clean_dataset.py <dataset_path> <output_dir>")
@@ -281,3 +340,38 @@ if __name__ == "__main__":
 
     df = run(path, output_dir)
     df.to_csv(os.path.join(output_dir, "dataset-clean.csv"), index=False)
+
+    print_flows_and_samples(df)
+    print("Removing extreme packet count samples...")
+    df = remove_extreme_packet_count_samples(df, min=4, max=1e6)
+    print(f"Samples after removing extreme packet counts: {sample_count(df)}")
+    print_flows_and_samples(df)
+
+    # these are the cols that stitch_dns uses and can aggr right now
+    keep_cols = (
+        stitch_dns.STITCH_COLS
+        + stitch_dns.FLOW_TUPLE_COLS
+        + list(stitch_dns.COL_AGG_FUNCS.keys())
+    )
+    df = df[keep_cols]
+    # has to be done before stitch_dns to be able to aggregate PPI cols
+    df = _parse_ppi(df)
+    df["TIME_FIRST"] = pd.to_datetime(df["TIME_FIRST"], format=DATE_FORMAT)
+    df["TIME_LAST"] = pd.to_datetime(df["TIME_LAST"], format=DATE_FORMAT)
+    df["DURATION"] = (df["TIME_LAST"] - df["TIME_FIRST"]).dt.total_seconds()
+
+    print("Stitching DNS samples...")
+    df = stitch_dns_uniflows(df)
+    print(f"Stitched samples stitching: {sample_count(df)}")
+    print_flows_and_samples(df)
+
+    print("Removing DNS-only samples...")
+    df = remove_dns_only_samples(df)
+    print(f"Samples after removing DNS-only: {sample_count(df)}")
+    print_flows_and_samples(df)
+
+    df['PPI_PKT_TIMES'] = df['PPI_PKT_TIMES'].apply(
+        lambda ts_list: [str(ts) for ts in ts_list]
+    )
+
+    df.to_csv(os.path.join(output_dir, "dataset-stitched.csv"), index=False)

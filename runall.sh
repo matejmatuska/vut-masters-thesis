@@ -126,8 +126,8 @@ stage "Filtering files in $PRE_FILTER_DIR to $OUT_DIR ..."
 python scripts/clean_dataset.py "$PRE_FILTER_DIR" "$OUT_DIR" || exit 1
 
 
-stage "Preparing for training $OUT_DIR/dataset-clean.csv -> $OUT_DIR/raw ..."
-python scripts/prep_dataset.py "$OUT_DIR/dataset-clean.csv" "$OUT_DIR/raw" || exit 1
+stage "Preparing for training $OUT_DIR/dataset-clean.csv -> $OUT_DIR ..."
+python scripts/prep_dataset.py "$OUT_DIR/dataset-stitched.csv" "$OUT_DIR" || exit 1
 
 stage "Done. Outputs written to $OUT_DIR"
 
