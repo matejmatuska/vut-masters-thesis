@@ -8,9 +8,15 @@ TCP_FLAGS_VALUES = 256  # 8 bit representation
 
 
 class EdgeMPNN(MessagePassing):
-    def __init__(self, edge_mlp, dropout):
+    def __init__(self, input_dim, hidden_dim, dropout):
         super().__init__(aggr="sum")
-        self.edge_mlp = edge_mlp
+        self.edge_mlp = torch.nn.Sequential(
+            torch.nn.Linear(input_dim, hidden_dim),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(dropout),
+            torch.nn.Linear(hidden_dim, hidden_dim),
+        )
+
 
     def forward(self, x, edge_index, edge_attr):
         edge_index, edge_attr = add_self_loops(edge_index, edge_attr, fill_value="mean")
@@ -40,14 +46,8 @@ class BaselineClassifier(torch.nn.Module):
         # hidden_dim = hidden_dim - port_dim
         # input_dim = edge_dim
 
-        self.edge_mlp = torch.nn.Sequential(
-            torch.nn.Linear(input_dim, hidden_dim),
-            torch.nn.ReLU(),
-            torch.nn.Dropout(dropout),
-            torch.nn.Linear(hidden_dim, hidden_dim),
-        )
         self.gnn_layers = nn.ModuleList(
-            [EdgeMPNN(self.edge_mlp, dropout) for _ in range(layers)]
+            [EdgeMPNN(input_dim, hidden_dim, dropout) for _ in range(layers)]
         )
         self.classifier = torch.nn.Sequential(
             torch.nn.Linear(hidden_dim * 2, hidden_dim),
