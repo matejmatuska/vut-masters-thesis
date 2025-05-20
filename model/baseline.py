@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch_geometric.nn import MessagePassing, global_max_pool
+from torch_geometric.nn import MessagePassing, global_max_pool, global_mean_pool
 from torch_geometric.utils import add_self_loops
 
 TOTAL_PORTS = 65536  # 2^16
@@ -49,9 +49,8 @@ class BaselineClassifier(torch.nn.Module):
         self.gnn_layers = nn.ModuleList(
             [EdgeMPNN(self.edge_mlp, dropout) for _ in range(layers)]
         )
-        self.pool = global_max_pool
         self.classifier = torch.nn.Sequential(
-            torch.nn.Linear(hidden_dim, hidden_dim),
+            torch.nn.Linear(hidden_dim * 2, hidden_dim),
             torch.nn.ReLU(),
             torch.nn.Dropout(dropout),
             torch.nn.Linear(hidden_dim, num_classes),
@@ -71,5 +70,7 @@ class BaselineClassifier(torch.nn.Module):
         for layer in self.gnn_layers:
             x = layer(x, data.edge_index, edge_attr)
 
-        graph_rep = self.pool(x, data.batch)
+        max_pool = global_max_pool(x, data.batch)
+        mean_pool = global_mean_pool(x, data.batch)
+        graph_rep = torch.cat([max_pool, mean_pool], dim=1)
         return self.classifier(graph_rep)
