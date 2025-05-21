@@ -124,10 +124,10 @@ blocks = [
 ]
 
 titles = [
-    "Diagonal Block 1 (Features 1–20)",
-    "Diagonal Block 2 (Features 16–35)",
-    "Diagonal Block 3 (Features 31–50)",
-    "Diagonal Block 4 (Features 46–60)",
+    "Diagonal Block 1 (Features 1-20)",
+    "Diagonal Block 2 (Features 16-35)",
+    "Diagonal Block 3 (Features 31-50)",
+    "Diagonal Block 4 (Features 46-60)",
 ]
 
 

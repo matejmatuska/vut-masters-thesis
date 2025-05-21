@@ -1,6 +1,5 @@
 import os
 from abc import ABC, abstractmethod
-# from typing import override
 
 import networkx as nx
 import pandas as pd
@@ -219,7 +218,6 @@ class BaselineDataset(BaseGraphDataset):
             )
         return G
 
-    # @override
     def sample_to_graph(self, df):
         graph = self._sample_to_graph(df)
         label = df["label_encoded"].iloc[0]
@@ -308,7 +306,6 @@ class Repr1Dataset(BaseGraphDataset):
 
         return G, dst_ports, tcp_flags, tcp_flags_rev
 
-    # @override
     def sample_to_graph(self, df):
         graph, dst_ports, tcp_flags, tcp_flags_rev = self._sample_to_graph(df)
         if len(graph) == 0:
@@ -353,7 +350,7 @@ class Repr2Dataset(BaseGraphDataset):
         current_host_id = 0
         current_flow_id = 0
 
-        for _, row in df.iloc[0:].iterrows():  # TODO do we need sorting?
+        for _, row in df.iloc[0:].iterrows():
             for ip in [row["SRC_IP"], row["DST_IP"]]:
                 if ip not in host_ip_to_id:
                     host_ip_to_id[ip] = current_host_id
@@ -396,7 +393,6 @@ class Repr2Dataset(BaseGraphDataset):
         data["NetworkFlow"].tcp_flags_rev = tcp_flags_rev
         return data
 
-    # @override
     def sample_to_graph(self, df):
         graph = self._sample_to_graph(df)
         if len(graph) == 0:

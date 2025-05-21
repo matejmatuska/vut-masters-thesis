@@ -93,42 +93,13 @@ def stitch_dns(df):
 
 
     # first aggregate the flows in the same direction
-    # print("Uniflow Aggregated:")
     df = df.groupby(groupcols).agg(COL_AGG_FUNCS).reset_index()
-    # print(df)
-    # print(df.index)
-    # print(df.columns)
 
-    # print("Reversed columns:")
+    # then flip the reversed flows
     df = df.groupby(STITCH_COLS, group_keys=False).apply(flip_reversed_flows)
-    # print(df)
-    # print(df.index)
-    # print(df.columns)
-
-    # print('Reset index')
-    # df = df.reset_index()
-    # print(df.index)
-    # print(df.columns)
 
     # agg to biflow
     print("Reversed columns and biflows merged")
     df = df.groupby(groupcols).agg(COL_AGG_FUNCS)
     # print(df)
     return df
-
-
-if __name__ == "__main__":
-    df = pd.read_csv(sys.argv[1])
-
-    # df = parse_ppi(df)
-
-    # lets drop some unused columns
-    keep_cols = set(COL_AGG_FUNCS.keys()) | set(STITCH_COLS) | set(FLOW_TUPLE_COLS)
-    df = df[list(keep_cols)]
-
-    dns = df[df["DNS_NAME"].notna()]
-    nondns = df[df["DNS_NAME"].isna()]
-
-    dns = stitch_dns(dns)
-    print("Final DNS:")
-    pd.concat([nondns, dns]).to_csv("stitched.csv", index=True)

@@ -7,19 +7,20 @@ df = pd.read_parquet(sys.argv[1])
 
 df = df.groupby(['sample', 'family']).size().reset_index(name='count')
 
-# Step 1: Drop duplicates to get one row per sample
 samples = df.drop_duplicates(subset='sample')[['sample', 'family']]
 
-# Step 2: Count number of samples per family
 family_counts = samples['family'].value_counts().reset_index()
 family_counts.columns = ['family', 'sample_count']
 
-# Step 3: Plot horizontally
+sns.set_style("whitegrid")
+sns.set_context("paper", font_scale=1.5)
+plt.figure(figsize=(12, 10))
 sns.barplot(data=family_counts, y='family', x='sample_count')
 
-
 # Optional: Beautify the plot
-plt.title('Number of Occurrences per Category')
-plt.xlabel('Category')
-plt.ylabel('Count')
+plt.title('Number of Samples per Family')
+plt.xlabel('Family')
+plt.ylabel('Number of Samples')
+plt.tight_layout()
+plt.savefig('sample_distrib.pdf', dpi=300)
 plt.show()

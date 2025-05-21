@@ -1,11 +1,11 @@
 import os
 import sys
+from ast import literal_eval
 
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from ast import literal_eval
 
 DATE_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
 
@@ -13,12 +13,12 @@ PPI_PAD_LEN = 30
 VAL_SIZE = 0.2
 TEST_SIZE = 0.1
 
-TOO_FEW_SAMPLES = 500
+TOO_FEW_SAMPLES = 300
 TOO_MANY_SAMPLES = 2000
 
 
 def print_flows_and_samples(df):
-    print(f"Samples {len(df["sample"].unique())}, Flows {len(df)}")
+    print(f"Samples {len(df['sample'].unique())}, Flows {len(df)}")
 
 
 def sample_count(df):
@@ -30,9 +30,14 @@ def _parse_ppi(df):
     df["PPI_PKT_DIRECTIONS"] = df["PPI_PKT_DIRECTIONS"].apply(literal_eval)
 
     df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(literal_eval)
-    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(pd.to_datetime, format=DATE_FORMAT)
+    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(
+        lambda lst: [pd.to_datetime(x, format="ISO8601").value // 10**6 for x in lst]
+    )
+    print("notna", df["PPI_PKT_TIMES"].notna().sum())
+    print("isna", df["PPI_PKT_TIMES"].isna().sum())
 
     return df
+
 
 def cap_samples_per_fam(df, min_samples, max_samples) -> pd.DataFrame:
     """
@@ -92,80 +97,71 @@ def normalize_all(df, per_packet_len=25) -> pd.DataFrame:
         return np.pad(lst, (0, pad_width), "constant", constant_values=value)
 
     # Ensure fixed-length arrays (padding or truncating to 30)
-    df['PPI_PKT_TIMES'] = df['PPI_PKT_TIMES'].apply(pad_or_truncate, args=(25, 0))
-    df['PPI_PKT_DIRECTIONS'] = df['PPI_PKT_DIRECTIONS'].apply(pad_or_truncate, args=(25, 0))
-    df['PPI_PKT_LENGTHS'] = df['PPI_PKT_LENGTHS'].apply(pad_or_truncate, args=(25, 0))
+    df["PPI_PKT_TIMES"] = df["PPI_PKT_TIMES"].apply(pad_or_truncate, args=(25, 0))
+    df["PPI_PKT_DIRECTIONS"] = df["PPI_PKT_DIRECTIONS"].apply(
+        pad_or_truncate, args=(25, 0)
+    )
+    df["PPI_PKT_LENGTHS"] = df["PPI_PKT_LENGTHS"].apply(pad_or_truncate, args=(25, 0))
     return df
 
 
 def extract_flow_features(row):
-    lens = np.array(row['PPI_PKT_LENGTHS'])
-    times = np.array(row['PPI_PKT_TIMES'])
-    dirs = np.array(row['PPI_PKT_DIRECTIONS'])
+    lens = np.array(row["PPI_PKT_LENGTHS"])
+    times = np.array(row["PPI_PKT_TIMES"])
+    dirs = np.array(row["PPI_PKT_DIRECTIONS"])
 
     # Basic stats
-    min_len = lens.min()
-    max_len = lens.max()
-    mean_len = lens.mean()
-    std_len = lens.std()
-    q1_len = np.percentile(lens, 25)
-    q2_len = np.percentile(lens, 50)
-    q3_len = np.percentile(lens, 75)
-    range_len = max_len - min_len
-    # skew_len = skew(lens)
-    # kurt_len = kurtosis(lens)
+    len_mean = lens.mean()
+    len_std = lens.std()
+    len_q1 = np.percentile(lens, 25)
+    len_q2 = np.percentile(lens, 50)
+    len_q3 = np.percentile(lens, 75)
 
     fwd_mask = dirs == 1
     bwd_mask = dirs == -1
-    num_fwd = fwd_mask.sum()
+    fwd_num = fwd_mask.sum()
     num_bwd = bwd_mask.sum()
-    fwd_bytes = lens[fwd_mask].sum() if num_fwd > 0 else 0
-    bwd_bytes = lens[bwd_mask].sum() if num_bwd > 0 else 0
-    fwd_bwd_ratio = fwd_bytes / (bwd_bytes + 1e-6)
-    mean_fwd_len = lens[fwd_mask].mean() if num_fwd > 0 else 0
-    mean_bwd_len = lens[bwd_mask].mean() if num_bwd > 0 else 0
+    bytes_fwd = lens[fwd_mask].sum() if fwd_num > 0 else 0
+    bytes_bwd = lens[bwd_mask].sum() if num_bwd > 0 else 0
+    ratio_fwd_bwd = bytes_fwd / (bytes_bwd + 1e-6)
     direction_switches = np.sum(np.diff(dirs) != 0)
 
     if len(times) >= 2:
         iats = np.diff(times)
-        mean_iat = iats.mean()
-        std_iat = iats.std()
-        min_iat = iats.min()
-        max_iat = iats.max()
-        q1_iat = np.percentile(iats, 25)
-        q2_iat = np.percentile(iats, 50)
-        q3_iat = np.percentile(iats, 75)
+        # mean_iat = iats.mean()
+        # std_iat = iats.std()
+        # min_iat = iats.min()
+        # max_iat = iats.max()
+        # q1_iat = np.percentile(iats, 25)
+        # q2_iat = np.percentile(iats, 50)
+        # q3_iat = np.percentile(iats, 75)
         duration = times[-1] - times[0]
-        packets_per_second = len(times) / (duration + 1e-6)
+        pps = len(times) / (duration + 1e-6)
     else:
-        mean_iat = std_iat = min_iat = max_iat = q1_iat = q2_iat = q3_iat = duration = packets_per_second = 0
+        mean_iat = std_iat = min_iat = max_iat = q1_iat = q2_iat = q3_iat = duration = (
+            pps
+        ) = 0
 
     return pd.Series(
         {
-            "min_len": min_len,
-           "max_len": max_len,
-            "mean_len": mean_len,
-            "std_len": std_len,
-            "q1_len": q1_len,
-            "q2_len": q2_len,
-            "q3_len": q3_len,
-            "range_len": range_len,
-            "num_fwd": num_fwd,
-            "num_bwd": num_bwd,
-            "fwd_bytes": fwd_bytes,
-            "bwd_bytes": bwd_bytes,
-            "fwd_bwd_ratio": fwd_bwd_ratio,
-            "mean_fwd_len": mean_fwd_len,
-            "mean_bwd_len": mean_bwd_len,
+            "len_mean": len_mean,
+            "len_std": len_std,
+            "len_q1": len_q1,
+            "len_q2": len_q2,
+            "len_q3": len_q3,
+            "bytes_forward": bytes_fwd,
+            "bytes_backward": bytes_bwd,
+            "ratio_forward_backward": ratio_fwd_bwd,
             "direction_switches": direction_switches,
-            "mean_iat": mean_iat,
-            "min_iat": min_iat,
-            "max_iat": max_iat,
-            "q1_iat": q1_iat,
-            "q2_iat": q2_iat,
-            "q3_iat": q3_iat,
-            "std_iat": std_iat,
-            "packets_per_second": packets_per_second,
+            "pkt_per_sec": pps,
+            # TODO
+            # "mean_iat": mean_iat,
+            # "min_iat": min_iat,
+            # "max_iat": max_iat,
+            # "q1_iat": q1_iat,
+            # "q2_iat": q2_iat,
+            # "q3_iat": q3_iat,
+            # "std_iat": std_iat,
         }
     )
 
@@ -207,6 +203,11 @@ def normalize_splits(
         "BYTES_REV",
         "DURATION",
     ] + new_feats_cols
+
+    # df_train["min_iat"] = df_train["min_iat"].fillna(0)
+    # df_train["q1_iat"] = df_train["q1_iat"].fillna(0)
+    # df_val["q2_iat"] = df_val["q2_iat"].fillna(0)
+    # df_test["q3_iat"] = df_test["q3_iat"].fillna(0)
 
     for col in scalars:
         df_train[col] = np.log1p(df_train[col])
@@ -252,10 +253,6 @@ def normalize_splits(
     df_val["DURATION"] = df_val["DURATION"].fillna(0)
     df_test["DURATION"] = df_test["DURATION"].fillna(0)
 
-    df_train["min_iat"] = df_train["min_iat"].fillna(0)
-    df_train["q1_iat"] = df_train["q1_iat"].fillna(0)
-    df_val["q2_iat"] = df_val["q2_iat"].fillna(0)
-    df_test["q3_iat"] = df_test["q3_iat"].fillna(0)
     return df_train, df_val, df_test
 
 
@@ -263,34 +260,38 @@ def train_val_test_split(
     df, val_size, test_size, random_state=83
 ) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
     """
-    Split the dataset into train, validation, and test sets in a stratified manner.
+    Splits the dataset into train, validation, and test sets.
+
+    The split is stratified by family and sample size.
     """
-    sample_sizes = df.groupby('sample').size().rename('sample_size')
-    sample_families = df[['sample', 'family']].drop_duplicates().set_index('sample')
+    sample_sizes = df.groupby("sample").size().rename("sample_size")
+    sample_families = df[["sample", "family"]].drop_duplicates().set_index("sample")
 
     sample_df = sample_families.join(sample_sizes)
 
-    sample_df['size_bin'] = pd.qcut(sample_df['sample_size'], q=5, duplicates='drop')
+    sample_df["size_bin"] = pd.qcut(sample_df["sample_size"], q=5, duplicates="drop")
 
     # stratify by key and size bin
-    sample_df['stratify_key'] = sample_df['family'].astype(str) + "__" + sample_df['size_bin'].astype(str)
+    sample_df["stratify_key"] = (
+        sample_df["family"].astype(str) + "__" + sample_df["size_bin"].astype(str)
+    )
 
     train_samples, temp_samples = train_test_split(
         sample_df,
         test_size=val_size + test_size,
-        stratify=sample_df['stratify_key'],
-        random_state=random_state
+        stratify=sample_df["stratify_key"],
+        random_state=random_state,
     )
     val_samples, test_samples = train_test_split(
         temp_samples,
         test_size=test_size / (val_size + test_size),
-        stratify=temp_samples['stratify_key'],
-        random_state=random_state
+        stratify=temp_samples["stratify_key"],
+        random_state=random_state,
     )
 
-    train_df = df[df['sample'].isin(train_samples.index)]
-    val_df = df[df['sample'].isin(val_samples.index)]
-    test_df = df[df['sample'].isin(test_samples.index)]
+    train_df = df[df["sample"].isin(train_samples.index)]
+    val_df = df[df["sample"].isin(val_samples.index)]
+    test_df = df[df["sample"].isin(test_samples.index)]
 
     return train_df, val_df, test_df
 
@@ -312,6 +313,8 @@ def prepare_features(df, new_feats_cols) -> (pd.DataFrame, pd.DataFrame, pd.Data
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("Usage: python prep_dataset.py <dset_path> <output_dir>")
+        print("       dset_path: Path to the stitched dataset .parquet file")
+        print("       output_dir: Path to the output directory")
         sys.exit(1)
 
     path = sys.argv[1]
@@ -325,14 +328,13 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print(f"Loading dataset from {path}...")
-    df = pd.read_parquet(path)
+    df = pd.read_csv(path)
 
     if len(df) == 0:
         print("Empty dataset, nothing to do. Make sure there is enough samples.")
         sys.exit(1)
 
-    print(df['PPI_PKT_TIMES'].head())
-
+    df = _parse_ppi(df)
     print("Capping samples per family...")
     # WARN: there is no check if there are enough samples
     df = cap_samples_per_fam(df, TOO_FEW_SAMPLES, TOO_MANY_SAMPLES)
@@ -343,12 +345,13 @@ if __name__ == "__main__":
 
     print("Adding new features...")
     df, new_feats_cols = new_features(df)
+    new_feats_path = os.path.join(output_dir, "dataset-all-feats.parquet")
 
     print("Normalizing dataset")
     df = normalize_all(df, per_packet_len=PPI_PAD_LEN)
     print("Normalizing done:")
     print(df.head())
-    new_feats_path = os.path.join(output_dir, "dataset-all-feats.parquet")
+    new_feats_path = os.path.join(output_dir, "dataset-all-feats-normed.parquet")
     df.to_parquet(new_feats_path, index=False)
 
     train, val, test = prepare_features(df, new_feats_cols)
@@ -357,12 +360,12 @@ if __name__ == "__main__":
         f"Storing train dataset to {output_dir}/train.parquet and {output_dir}/train.csv..."
     )
     train.to_parquet(os.path.join(output_dir, "train.parquet"), index=False)
-    # train.to_csv(os.path.join(output_dir, "train.csv"), index=False)
+    train.to_csv(os.path.join(output_dir, "train.csv"), index=False)
     print(
         f"Storing val dataset to {output_dir}/val.parquet and {output_dir}/val.csv..."
     )
     val.to_parquet(os.path.join(output_dir, "val.parquet"), index=False)
-    # val.to_csv(os.path.join(output_dir, "val.csv"), index=False)
+    val.to_csv(os.path.join(output_dir, "val.csv"), index=False)
     print(
         f"Storing test dataset to {output_dir}/test.parquet and {output_dir}/test.csv..."
     )

@@ -143,68 +143,12 @@ def load_and_filter_top1m(top1m_path) -> pd.DataFrame:
     :return: the filtered top-1m domains
     :rtype: pd.DataFrame
     """
-    keep_domains = [
-        r"^mail\..*",
-        r"^smtp\..*",
-        r"^webmail\..*",
-        r"drive\.google\.com$",
-        r"steamcommunity\.com$",
-        r"t\.me$",
-        r"api\.ip\.sb$",
-        r"api\.ipify\.org$",
-        r"api\.myip\.com$",
-        r"api\.steampowered\.com$",
-        r"api\.telegram\.org$",
-        r"apis\.roblox\.com$",
-        r"bitbucket\.org$",
-        r"discord\.(com|gg)$",
-        r"drive\.usercontent\.google\.com$",
-        r"example\.org$",
-        r"freegeoip\.app$",
-        r"g\.api\.mega\.co\.nz$",
-        r"gateway\.discord\.gg$",
-        r"geolocation-db\.com$",
-        r"geolocation\.onetrust\.com$",
-        r"geoplugin\.net$",
-        r"gofile\.io$",
-        r"hbx\.media\.net$",
-        r"i\.imgur\.com$",
-        r"ip-api\.com$",
-        r"ip-info\.ff\.avast\.com$",
-        r"ipbase\.com$",
-        r"ipinfo\.io$",
-        r"iplogger\.org$",
-        r"mediafire\.com$",
-        r"mega\.nz$",
-        r"onedrive\.live\.com$",
-        r"pastebin\.com$",
-        r"pool\.hashvault\.pro$",
-        r"tinyurl\.com$",
-        r".*tlauncher\.org$",
-        r"whatismyipaddress\.com$",
-        r"www\.dropbox\.com$",
-        r"www\.mediafire\.com$",
-        r"www\.mediafiredls\.com$",
-        r"www\.myexternalip\.com$",
-        r"2makestorage\.com$",
-        # from URLhaus database
-        r"activetykes\.shop$",
-        r"distro\.ibiblio\.org$",
-        r"dl\.dropboxusercontent\.com$",
-        r"(.*\.)contabostorage\.com$$",
-        r"firebasestorage\.googleapis\.com$",
-        # r'github\.com$',
-        r"ia803402\.us\.archive\.org$",
-        r"paste\.ee$",
-        r"res\.cloudinary\.com$",
-        r"sin1\.contabostorage\.com$",
-        r"static1\.squarespace\.com$",
-        r"update\.drp\.su$",
-        r"update\.itopvpn\.com$",
-        r"web\.archive\.org$",
-    ]
-    # htlb.casalemedia.com
-    # TODO keep dns server names?
+    with open(os.path.join("data", "keep_domains.txt"), "r") as f:
+        keep_domains = f.read().splitlines()
+    if not keep_domains:
+        print("WARN: No domains to keep")
+        return pd.DataFrame()
+
     combined_regex = "|".join(f"({pattern})" for pattern in keep_domains)
 
     top1m = pd.read_csv(top1m_path, names=["index", "domain"], usecols=["domain"])[
@@ -375,3 +319,4 @@ if __name__ == "__main__":
     )
 
     df.to_csv(os.path.join(output_dir, "dataset-stitched.csv"), index=False)
+    df.to_parquet(os.path.join(output_dir, "dataset-stitched.parquet"), index=False)

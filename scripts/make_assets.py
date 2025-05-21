@@ -117,8 +117,8 @@ def make_latex_dset_tab(df, path='out/tab.tex'):
     tab = tab[tab['flows'] > 100]
     tab.sort_values(by='family', inplace=True, key=lambda col: col.str.lower())
     tab = tab.reset_index()
-    tab['type'] = tab['family'].map(type_map)
-    tab = tab.reindex(columns=['family', 'type', 'samples', 'flows'])
+    # tab['type'] = tab['family'].map(type_map)
+    tab = tab.reindex(columns=['family', 'samples', 'flows'])
     tab.loc['Total'] = tab.sum(numeric_only=True)
     tab = tab.astype({'samples': 'int', 'flows': 'int'})
     #print(tab['flows'] / tab['samples'])
@@ -252,8 +252,9 @@ def make_repr_2(df):
 if __name__ == '__main__':
     path = sys.argv[1]
     df = pd.read_csv(path)
-    df['family'].replace(columns, inplace=True)
+    # df['family'].replace(columns, inplace=True)
     make_latex_dset_tab(df)
+    sys.exit(0)
 
     #df = df[(df['family'] == 'Vidar') & (df['sample'] == '240720-fvt33sxfnq.behavioral1.csv')]
     df = df[df['sample'] == '240822-hpsdeaxcjm.behavioral2.csv']
