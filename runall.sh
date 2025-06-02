@@ -49,11 +49,10 @@ CONTAINER=${CONTAINER:-localhost/process-data:latest}
 LOG_FILE="$WORKDIR/log-$(date +"%Y-%m-%dT%H:%M:%S").txt"
 
 EXTRACT_DIR="$WORKDIR/extracted"
-COMBINE_DIR="$WORKDIR/combined"
-PRE_FILTER_DIR="$WORKDIR/csvs"
+CSVS_DIR="$WORKDIR/csvs"
 OUT_DIR="$WORKDIR/out"
 
-mkdir -p "$EXTRACT_DIR" "$COMBINE_DIR" "$PRE_FILTER_DIR" "$OUT_DIR" || exit 1
+mkdir -p "$EXTRACT_DIR" "$CSVS_DIR" "$OUT_DIR" || exit 1
 
 
 function stage {
@@ -63,36 +62,36 @@ function stage {
 
 pushd "$DATASET_DIR" || exit 1
 
-# stage "Unpacking archives to $EXTRACT_DIR ..."
-# for i in {23..24}; do
-#     file="$DATASET_DIR/Malware-202407$i.tar.gz"
-#     if [ ! -f "$file" ]; then
-#         echo "File $file not found, skipping."
-#         continue
-#     fi
-#     echo "Unpacking $file ..." | tee -a "$LOG_FILE"
-#     tar --strip-components=1 -xzvf "$file" -C "$EXTRACT_DIR" >> "$LOG_FILE" 2>&1
-# done
-# for i in {25..26}; do
-#     file="$DATASET_DIR/Malware-202407$i.tar" # TODO naspat
-#     if [ ! -f "$file" ]; then
-#         echo "File $file not found, skipping."
-#         continue
-#     fi
-#     echo "Unpacking $file ..." | tee -a "$LOG_FILE"
-#     tar --strip-components=2 -xvf "$file" -C "$EXTRACT_DIR" >> "$LOG_FILE" 2>&1
-# done
-#
-# for i in {01..30}; do
-#     file="$DATASET_DIR/Malware-202408$i.tar"
-#     if [ ! -f "$file" ]; then
-#         echo "File $file not found, skipping."
-#         continue
-#     fi
-#     echo "Unpacking $file ..." | tee -a "$LOG_FILE"
-#     tar --strip-components=2 -xvf "$file" -C "$EXTRACT_DIR" >> "$LOG_FILE" 2>&1
-# done
-#
+stage "Unpacking archives to $EXTRACT_DIR ..."
+for i in {23..24}; do
+    file="$DATASET_DIR/Malware-202407$i.tar.gz"
+    if [ ! -f "$file" ]; then
+        echo "File $file not found, skipping."
+        continue
+    fi
+    echo "Unpacking $file ..." | tee -a "$LOG_FILE"
+    tar --strip-components=2 -xzvf "$file" -C "$EXTRACT_DIR" >> "$LOG_FILE" 2>&1
+done
+for i in {25..31}; do
+    file="$DATASET_DIR/Malware-202407$i.tar"
+    if [ ! -f "$file" ]; then
+        echo "File $file not found, skipping."
+        continue
+    fi
+    echo "Unpacking $file ..." | tee -a "$LOG_FILE"
+    tar --strip-components=2 -xvf "$file" -C "$EXTRACT_DIR" >> "$LOG_FILE" 2>&1
+done
+
+for i in {01..30}; do
+    file="$DATASET_DIR/Malware-202408$i.tar"
+    if [ ! -f "$file" ]; then
+        echo "File $file not found, skipping."
+        continue
+    fi
+    echo "Unpacking $file ..." | tee -a "$LOG_FILE"
+    tar --strip-components=2 -xvf "$file" -C "$EXTRACT_DIR" >> "$LOG_FILE" 2>&1
+done
+
 stage "Removing duplicates in $EXTRACT_DIR ..."
 find "$EXTRACT_DIR" -name '2407*' -type f -print0 |
     awk -F/ 'BEGIN { RS="\0" }
@@ -111,27 +110,15 @@ find "$EXTRACT_DIR" -name '2407*' -type f -print0 |
         }' >> "$LOG_FILE" 2>&1 || exit 1
 
 
-# stage "Combining date directories in $EXTRACT_DIR to $COMBINE_DIR ..."
-# # this will sometimes print out error because not all family directories are
-# # present in all date directories
-# for dir in "$EXTRACT_DIR"/2024072?; do
-#     for fam in "$dir"/*; do
-#         mkdir -p "$COMBINE_DIR/$(basename "$fam")"
-#         cp -r "$fam"/* "$COMBINE_DIR/$(basename "$fam")"
-#     done
-# done
-
-
-stage "Converting files in $EXTRACT_DIR to CSVs to $PRE_FILTER_DIR ..."
-# TODO set the dirs better for the podman run
+stage "Converting files in $EXTRACT_DIR to CSVs to $CSVS_DIR ..."
 podman run --rm -ti -v "$WORKDIR":/data:z "$CONTAINER" \
-    "$(basename "$EXTRACT_DIR")" "$(basename "$PRE_FILTER_DIR")" >> "$LOG_FILE" 2>&1 || exit 1
+    "$(basename "$EXTRACT_DIR")" "$(basename "$CSVS_DIR")" >> "$LOG_FILE" 2>&1 || exit 1
 
 popd || exit 1
 
 
-stage "Filtering files in $PRE_FILTER_DIR to $OUT_DIR ..."
-python scripts/clean_dataset.py "$PRE_FILTER_DIR" "$OUT_DIR" || exit 1
+stage "Filtering files in $CSVS_DIR to $OUT_DIR ..."
+python scripts/clean_dataset.py "$CSVS_DIR" "$OUT_DIR" || exit 1
 
 
 stage "Preparing for training $OUT_DIR/dataset-clean.csv -> $OUT_DIR ..."

@@ -1,3 +1,7 @@
+"""
+A script to train and evaluate a GNN model.
+"""
+
 import argparse
 import time
 

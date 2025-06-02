@@ -1,3 +1,6 @@
+"""
+This script prepares the dataset for training and evaluation.
+"""
 import os
 import sys
 from ast import literal_eval
@@ -85,7 +88,7 @@ def normalize_all(df, per_packet_len=25) -> pd.DataFrame:
 
     def times_to_relative(timestamps):
         base = timestamps[0]
-        relative_times = [(ts - base) for ts in timestamps]
+        relative_times = [(ts - base).total_seconds() for ts in timestamps]
         # Exclude the first timestamp since it's always 0 - can use 0 for padding
         return relative_times[1:]
 
@@ -123,45 +126,28 @@ def extract_flow_features(row):
     num_bwd = bwd_mask.sum()
     bytes_fwd = lens[fwd_mask].sum() if fwd_num > 0 else 0
     bytes_bwd = lens[bwd_mask].sum() if num_bwd > 0 else 0
-    ratio_fwd_bwd = bytes_fwd / (bytes_bwd + 1e-6)
+    ratio_fwd_bwd = bytes_fwd / bytes_bwd if bytes_bwd > 0 else 0
     direction_switches = np.sum(np.diff(dirs) != 0)
 
     if len(times) >= 2:
-        iats = np.diff(times)
-        # mean_iat = iats.mean()
-        # std_iat = iats.std()
-        # min_iat = iats.min()
-        # max_iat = iats.max()
-        # q1_iat = np.percentile(iats, 25)
-        # q2_iat = np.percentile(iats, 50)
-        # q3_iat = np.percentile(iats, 75)
         duration = times[-1] - times[0]
-        pps = len(times) / (duration + 1e-6)
+        pps = len(times) / duration if duration > 0 else 0
+
     else:
-        mean_iat = std_iat = min_iat = max_iat = q1_iat = q2_iat = q3_iat = duration = (
-            pps
-        ) = 0
+        duration = pps = 0
 
     return pd.Series(
         {
-            "len_mean": len_mean,
-            "len_std": len_std,
-            "len_q1": len_q1,
-            "len_q2": len_q2,
-            "len_q3": len_q3,
-            "bytes_forward": bytes_fwd,
-            "bytes_backward": bytes_bwd,
-            "ratio_forward_backward": ratio_fwd_bwd,
+            "mean_len": len_mean,
+            "std_len": len_std,
+            "q1_len": len_q1,
+            "q2_len": len_q2,
+            "q3_len": len_q3,
+            "fwd_bytes": bytes_fwd,
+            "bwd_bytes": bytes_bwd,
+            "fwd_bwd_ratio": ratio_fwd_bwd,
             "direction_switches": direction_switches,
-            "pkt_per_sec": pps,
-            # TODO
-            # "mean_iat": mean_iat,
-            # "min_iat": min_iat,
-            # "max_iat": max_iat,
-            # "q1_iat": q1_iat,
-            # "q2_iat": q2_iat,
-            # "q3_iat": q3_iat,
-            # "std_iat": std_iat,
+            "packets_per_second": pps,
         }
     )
 
@@ -203,11 +189,6 @@ def normalize_splits(
         "BYTES_REV",
         "DURATION",
     ] + new_feats_cols
-
-    # df_train["min_iat"] = df_train["min_iat"].fillna(0)
-    # df_train["q1_iat"] = df_train["q1_iat"].fillna(0)
-    # df_val["q2_iat"] = df_val["q2_iat"].fillna(0)
-    # df_test["q3_iat"] = df_test["q3_iat"].fillna(0)
 
     for col in scalars:
         df_train[col] = np.log1p(df_train[col])
@@ -328,13 +309,14 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print(f"Loading dataset from {path}...")
-    df = pd.read_csv(path)
+    df = pd.read_parquet(path)
 
     if len(df) == 0:
         print("Empty dataset, nothing to do. Make sure there is enough samples.")
         sys.exit(1)
 
-    df = _parse_ppi(df)
+    # df = _parse_ppi(df)
+
     print("Capping samples per family...")
     # WARN: there is no check if there are enough samples
     df = cap_samples_per_fam(df, TOO_FEW_SAMPLES, TOO_MANY_SAMPLES)
@@ -346,6 +328,7 @@ if __name__ == "__main__":
     print("Adding new features...")
     df, new_feats_cols = new_features(df)
     new_feats_path = os.path.join(output_dir, "dataset-all-feats.parquet")
+    df.to_parquet(new_feats_path, index=False)
 
     print("Normalizing dataset")
     df = normalize_all(df, per_packet_len=PPI_PAD_LEN)

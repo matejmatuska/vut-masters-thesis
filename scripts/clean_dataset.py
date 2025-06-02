@@ -1,6 +1,10 @@
+"""
+This script cleans the dataset, see README.md for details.
+"""
 import os
 import sys
 from ast import literal_eval
+import json
 
 import pandas as pd
 
@@ -143,11 +147,8 @@ def load_and_filter_top1m(top1m_path) -> pd.DataFrame:
     :return: the filtered top-1m domains
     :rtype: pd.DataFrame
     """
-    with open(os.path.join("data", "keep_domains.txt"), "r") as f:
-        keep_domains = f.read().splitlines()
-    if not keep_domains:
-        print("WARN: No domains to keep")
-        return pd.DataFrame()
+    with open(os.path.join("data", "keep_domains.json"), "r") as f:
+        keep_domains = json.load(f)
 
     combined_regex = "|".join(f"({pattern})" for pattern in keep_domains)
 
@@ -194,7 +195,7 @@ def filter_rDNS(df) -> (pd.DataFrame, pd.DataFrame):
 
 def run(dset_path, output_dir) -> pd.DataFrame:
     # inputs
-    top1m_path = os.path.join("data", "top-1m.csv")  # TODO find some place for this
+    top1m_path = os.path.join("data", "top-1m.csv")
     common_ips_path = os.path.join(
         "data", "filter_common_ips.csv"
     )
@@ -211,9 +212,9 @@ def run(dset_path, output_dir) -> pd.DataFrame:
     prev_len = len(df)
 
     print("Filtering common IPs")
-    if True:  # TODO: this should be computed!!!
+    if True:  # uncomment to compute common IPs
         # common_ips = pd.read_csv('uniq_dst_ips.v2.csv')
-        common_ips = pd.read_csv(os.path.join("data", "filter_common_ips.csv"))
+        common_ips = pd.read_csv(common_ips_path)
     else:
         common_ips = get_common_ips(df)
         # common_ips.to_csv(common_ips_path, index=False)
@@ -315,7 +316,7 @@ if __name__ == "__main__":
     print_flows_and_samples(df)
 
     df['PPI_PKT_TIMES'] = df['PPI_PKT_TIMES'].apply(
-        lambda ts_list: [str(ts) for ts in ts_list]
+        lambda ts_list: [ts.value // 10**3 for ts in ts_list]
     )
 
     df.to_csv(os.path.join(output_dir, "dataset-stitched.csv"), index=False)

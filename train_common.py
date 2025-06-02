@@ -1,3 +1,8 @@
+"""
+train_common.py
+
+This module contains common functions used by the training and tuning scripts.
+"""
 from itertools import product
 
 import torch

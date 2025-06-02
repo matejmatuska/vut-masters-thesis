@@ -15,7 +15,7 @@ make build-ipfixprobe
 First, make sure to install the required dependencies. You can do this by running:
 ```bash
 pip install -r requirements.txt
-pip install -r requirements-torch.txt 
+pip install -r requirements-torch.txt
 ```
 or
 ```bash
@@ -64,6 +64,7 @@ This data is required by the scripts/clean_dataset.py script.
 - data/filter_common_ips.csv - contains the list of common IPs to filter out from the dataset. This is used to remove common IPs that are not relevant for the analysis. To generate a fresh list uncomment the generation in the `clean_dataset.py` script. A fresh list requires manual modification.
 - data/top-1m.csv - Cisco Umbrella's list of the top 1 million domains. This is used to filter out common domains that are not relevant for the analysis. Available at: <https://umbrella-static.s3-us-west-1.amazonaws.com/index.html>.
 - data/filter_common_ips.csv - if the generation is enabled in clean_dataset.py, contains the list of common IPs to filter out from the dataset. This is used to remove common IPs that are not relevant for the analysis.
+- data/keep_domains.json - contains the list of domains to exclude from the DNS filtering. This is used to keep the domains that are relevant for the analysis.
 
 #### Other data
 - data/Dockerfile.bin - Dockerfile with ipfixprobe installation

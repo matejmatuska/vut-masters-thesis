@@ -1,3 +1,6 @@
+"""
+This script is used to tune the hyperparameters of a GNN model using Optuna.
+"""
 import argparse
 import os
 import time
